@@ -232,6 +232,13 @@
       <a href="/dashboard" class="nav-item {% if request.url.path == '/dashboard' %}active{% endif %}">
         <span class="nav-icon">📊</span> Dashboard
       </a>
+      <div class="nav-label">Configuración</div>
+      <a href="/exchange" class="nav-item {% if request.url.path == '/exchange' %}active{% endif %}">
+        <span class="nav-icon">🔗</span> Exchange API
+      </a>
+      <a href="/password" class="nav-item {% if request.url.path == '/password' %}active{% endif %}">
+        <span class="nav-icon">🔒</span> Contraseña
+      </a>
     </div>
 
     <div class="sidebar-footer">

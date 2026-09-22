@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Exchange API — ETH DGT Bot{% endblock %}
+{% block topbar_title %}Configuración del Exchange{% endblock %}
+
+{% block content %}
+
+<!-- ── Estado de conexión ──────────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:1.25rem;">
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:1.5rem;">
+    <div>
+      <div class="card-title">Exchange activo</div>
+      <span id="exchangeBadge" class="badge badge-gray" style="font-size:0.95rem;">{{ exchange_client }}</span>
+    </div>
+    <div>
+      <div class="card-title">Par de trading</div>
+      <span class="badge badge-accent" style="font-size:0.95rem;">{{ trading_pair }}</span>
+    </div>
+    <div>
+      <div class="card-title">Estado de conexión</div>
+      <span id="connStatus" class="badge badge-gray">Sin verificar</span>
+    </div>
+    <div style="margin-left:auto;">
+      <button class="btn btn-primary btn-sm" onclick="testConnection()" id="btnTest">🔌 Probar conexión</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Resultado del test ──────────────────────────────────────────────── -->
+<div id="testResult" class="card" style="margin-bottom:1.25rem; display:none;">
+  <div class="card-title">Resultado del test</div>
+  <pre id="testOutput" style="background:var(--bg); padding:1rem; border-radius:6px; font-size:0.85rem; overflow-x:auto; color:var(--text); margin-top:0.5rem;"></pre>
+</div>
+
+<!-- ── Configuración de API keys ──────────────────────────────────────── -->
+<div class="section">
+  <div class="section-title">Credenciales de Bitso</div>
+  <div class="card">
+    <form id="exchangeForm" onsubmit="saveExchange(event)">
+      <div class="form-group">
+        <label class="form-label">Exchange</label>
+        <select name="exchange_client" id="fldExchange">
+          <option value="mock" {% if exchange_client == 'mock' %}selected{% endif %}>Mock (simulador)</option>
+          <option value="bitso" {% if exchange_client == 'bitso' %}selected{% endif %}>Bitso (real)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">API Key</label>
+        <input type="text" name="api_key" id="fldApiKey" value="{{ api_key_masked }}" placeholder="Tu API key de Bitso" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">API Secret</label>
+        <input type="password" name="api_secret" id="fldApiSecret" value="" placeholder="{% if has_secret %}••••••••••••• (guardado){% else %}Tu API secret de Bitso{% endif %}" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Par de trading</label>
+        <select name="trading_pair" id="fldPair">
+          <option value="eth_usdt" {% if trading_pair == 'eth_usdt' %}selected{% endif %}>ETH / USDT</option>
+          <option value="eth_usd" {% if trading_pair == 'eth_usd' %}selected{% endif %}>ETH / USD</option>
+          <option value="eth_mxn" {% if trading_pair == 'eth_mxn' %}selected{% endif %}>ETH / MXN</option>
+        </select>
+      </div>
+
+      <div style="display:flex; gap:0.75rem; align-items:center; margin-top:1.5rem;">
+        <button type="submit" class="btn btn-primary">💾 Guardar</button>
+        <span id="saveMsg" style="font-size:0.85rem; color:var(--green); display:none;">Guardado ✓</span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Info de seguridad ───────────────────────────────────────────────── -->
+<div class="section">
+  <div class="card" style="border-color:rgba(56,139,253,0.3);">
+    <div style="display:flex; gap:0.75rem; align-items:start;">
+      <span style="font-size:1.2rem;">ℹ️</span>
+      <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.7;">
+        <strong style="color:var(--blue);">Notas de seguridad:</strong><br>
+        • Las API keys se guardan encriptadas en la base de datos local, no en archivos de texto.<br>
+        • Para operar en live necesitás: exchange = Bitso, API keys válidas, y DRY_RUN = false.<br>
+        • El bot solo opera en el par configurado (ETH/USDT). No toca BTC ni otras monedas.<br>
+        • Recomendación: creá API keys con permisos limitados a trading, sin retiro de fondos.
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveExchange(e) {
+  e.preventDefault();
+  const form = new FormData(document.getElementById('exchangeForm'));
+  try {
+    const r = await fetch('/api/eth/exchange', { method: 'POST', body: form });
+    const d = await r.json();
+    if (d.ok) {
+      toast('Configuración guardada');
+      const msg = document.getElementById('saveMsg');
+      msg.style.display = 'inline';
+      setTimeout(() => msg.style.display = 'none', 3000);
+    } else {
+      toast('Error: ' + (d.error || 'desconocido'), false);
+    }
+  } catch(err) { toast('Error de red', false); }
+}
+
+async function testConnection() {
+  const btn = document.getElementById('btnTest');
+  btn.disabled = true;
+  btn.textContent = '⏳ Probando…';
+  document.getElementById('connStatus').textContent = 'Probando…';
+  document.getElementById('connStatus').className = 'badge badge-yellow';
+
+  try {
+    const r = await fetch('/api/eth/exchange/test', { method: 'POST' });
+    const d = await r.json();
+    const box = document.getElementById('testResult');
+    const out = document.getElementById('testOutput');
+    box.style.display = 'block';
+
+    if (d.ok) {
+      document.getElementById('connStatus').textContent = 'Conectado ✓';
+      document.getElementById('connStatus').className = 'badge badge-green';
+      out.style.color = 'var(--green)';
+      let text = '✓ Conexión exitosa\n\n';
+      if (d.balances) {
+        text += 'Balances:\n';
+        for (const [coin, bal] of Object.entries(d.balances)) {
+          text += `  ${coin.toUpperCase()}: ${bal.available} disponible, ${bal.locked} bloqueado\n`;
+        }
+      }
+      if (d.ticker) {
+        text += `\nTicker ${d.ticker.pair}:\n`;
+        text += `  Precio: $${d.ticker.last}\n`;
+        text += `  Bid: $${d.ticker.bid}  Ask: $${d.ticker.ask}\n`;
+      }
+      out.textContent = text;
+    } else {
+      document.getElementById('connStatus').textContent = 'Error ✗';
+      document.getElementById('connStatus').className = 'badge badge-red';
+      out.style.color = 'var(--red)';
+      out.textContent = '✗ Error de conexión\n\n' + (d.error || 'Error desconocido');
+    }
+  } catch(err) {
+    document.getElementById('connStatus').textContent = 'Error ✗';
+    document.getElementById('connStatus').className = 'badge badge-red';
+    toast('Error de red', false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔌 Probar conexión';
+  }
+}
+</script>
+{% endblock %}

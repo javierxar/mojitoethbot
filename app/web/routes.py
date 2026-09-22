@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -14,7 +15,7 @@ from sqlalchemy import desc
 
 from app import config
 from app.database import db_session, get_setting, set_setting
-from app.models import EthBotState, EthCandle, EthTrade
+from app.models import Auth, EthBotState, EthCandle, EthTrade
 
 logger = logging.getLogger(__name__)
 
@@ -261,3 +262,122 @@ def api_tick(request: Request):
     except Exception as exc:
         logger.exception("[WEB] Error en tick manual: %s", exc)
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+# ── Exchange Config ──────────────────────────────────────────────────────────
+
+@router.get("/exchange", response_class=HTMLResponse)
+async def exchange_page(request: Request):
+    with db_session() as db:
+        ctx = _base_ctx(request, db)
+        exchange_client = get_setting(db, "exchange_client", config.EXCHANGE_CLIENT)
+        api_key = get_setting(db, "exchange_api_key", "") or ""
+        api_secret = get_setting(db, "exchange_api_secret", "") or ""
+        trading_pair = get_setting(db, "trading_pair", config.TRADING_PAIR)
+        ctx.update({
+            "exchange_client": exchange_client,
+            "api_key_masked": api_key[:6] + "•••" if len(api_key) > 6 else api_key,
+            "has_secret": bool(api_secret),
+            "trading_pair": trading_pair,
+        })
+    return templates.TemplateResponse("exchange_config.html", ctx)
+
+
+@router.post("/api/eth/exchange")
+async def api_exchange_save(
+    request: Request,
+    exchange_client: str = Form(...),
+    api_key: str = Form(""),
+    api_secret: str = Form(""),
+    trading_pair: str = Form("eth_usdt"),
+):
+    with db_session() as db:
+        set_setting(db, "exchange_client", exchange_client.strip().lower())
+        set_setting(db, "trading_pair", trading_pair.strip().lower())
+        if api_key and "•" not in api_key:
+            set_setting(db, "exchange_api_key", api_key.strip())
+        if api_secret:
+            set_setting(db, "exchange_api_secret", api_secret.strip())
+    logger.info("[WEB] Exchange config guardada: %s / %s", exchange_client, trading_pair)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/eth/exchange/test")
+async def api_exchange_test(request: Request):
+    try:
+        from app.exchanges.factory import get_exchange_client
+        client = get_exchange_client()
+        client_name = type(client).__name__
+
+        with db_session() as db:
+            pair = get_setting(db, "trading_pair", config.TRADING_PAIR)
+
+        result: dict = {"ok": True, "client": client_name}
+
+        try:
+            ticker = client.get_ticker(pair)
+            result["ticker"] = {
+                "pair": pair,
+                "last": ticker.get("last"),
+                "bid": ticker.get("bid"),
+                "ask": ticker.get("ask"),
+            }
+        except Exception as exc:
+            result["ticker_error"] = str(exc)
+
+        try:
+            balances = client.get_balances()
+            result["balances"] = {
+                k: {"available": v["available"], "locked": v["locked"]}
+                for k, v in balances.items()
+                if v.get("available", 0) > 0 or v.get("locked", 0) > 0
+            }
+        except Exception as exc:
+            result["balances_error"] = str(exc)
+
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("[WEB] Error en test de exchange: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)})
+
+
+# ── Change Password ──────────────────────────────────────────────────────────
+
+@router.get("/password", response_class=HTMLResponse)
+async def password_page(request: Request):
+    with db_session() as db:
+        ctx = _base_ctx(request, db)
+        needs_change = get_setting(db, "password_needs_change", "false")
+        ctx["needs_change"] = needs_change == "true"
+    return templates.TemplateResponse("change_password.html", ctx)
+
+
+@router.post("/api/eth/password")
+async def api_change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    username = getattr(request.state, "username", "")
+    if not username:
+        return JSONResponse({"ok": False, "error": "Sesión inválida"}, status_code=401)
+
+    if new_password != confirm_password:
+        return JSONResponse({"ok": False, "error": "Las contraseñas no coinciden"})
+
+    if len(new_password) < 6:
+        return JSONResponse({"ok": False, "error": "La contraseña debe tener al menos 6 caracteres"})
+
+    from app.auth import _check_password, change_password
+
+    with db_session() as db:
+        user = db.query(Auth).filter(Auth.username == username).first()
+        if not user:
+            return JSONResponse({"ok": False, "error": "Usuario no encontrado"})
+        if not _check_password(current_password, user.password_hash):
+            return JSONResponse({"ok": False, "error": "Contraseña actual incorrecta"})
+
+    change_password(username, new_password)
+    logger.info("[WEB] Contraseña cambiada para: %s", username)
+    return JSONResponse({"ok": True})
