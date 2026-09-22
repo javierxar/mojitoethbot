@@ -243,7 +243,7 @@ def _execute_live(db, decision, client) -> None:
 
 
 def _usd_to_quote(client, pair: str, amount_usd: float) -> float:
-    if pair.endswith("_usd"):
+    if pair.endswith("_usd") or pair.endswith("_usdt"):
         return round(amount_usd, 2)
     try:
         fiat = pair.split("_")[1]

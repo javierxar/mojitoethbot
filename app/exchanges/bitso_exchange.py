@@ -1,17 +1,17 @@
 """
-BitsoExchangeClient — cliente real para la API v3 de Bitso, adaptado a ETH.
+BitsoExchangeClient — cliente real para la API v3 de Bitso, adaptado a ETH/USDT.
 
 Referencia: https://docs.bitso.com/bitso-api/docs
 
-Par por defecto: eth_ars (Bitso opera en Argentina). También soporta eth_mxn / eth_usd.
+Par por defecto: eth_usdt. También soporta eth_mxn / eth_usd.
 
 Las velas OHLCV NO vienen de Bitso: se descargan de la API pública de Binance
 (ETHUSDT) porque Bitso no expone klines históricas de forma conveniente.
 
 TODOs pendientes de verificación contra documentación oficial de Bitso:
-  - TODO [B2]: Confirmar campo de monto en POST /orders (major=ETH / minor=fiat)
+  - TODO [B2]: Confirmar campo de monto en POST /orders (major=ETH / minor=USDT)
   - TODO [B3]: Confirmar estructura de GET /orders/{oid} response
-  - TODO [B6]: Confirmar book name "eth_ars" / "eth_mxn"
+  - TODO [B6]: Confirmar book name "eth_usdt" en Bitso
 
 NUNCA activar DRY_RUN=false sin revisar todos los TODOs anteriores.
 """

@@ -55,8 +55,8 @@ ETH_BOT_ENABLED: bool = _get_bool("ETH_BOT_ENABLED", True)
 EXCHANGE_CLIENT: str = _get("EXCHANGE_CLIENT", "mock")
 BITSO_API_KEY: str = _get("BITSO_API_KEY", "")
 BITSO_API_SECRET: str = _get("BITSO_API_SECRET", "")
-# Par de trading en Bitso: eth_ars (Argentina) | eth_mxn (México) | eth_usd
-TRADING_PAIR: str = _get("TRADING_PAIR", "eth_ars")
+# Par de trading en Bitso: eth_usdt | eth_mxn | eth_usd
+TRADING_PAIR: str = _get("TRADING_PAIR", "eth_usdt")
 
 # ─── Fuente de velas (Binance público, sin auth) ─────────────────────────────
 BINANCE_SYMBOL: str = _get("BINANCE_SYMBOL", "ETHUSDT")
