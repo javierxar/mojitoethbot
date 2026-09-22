@@ -112,6 +112,66 @@
   </div>
 </div>
 
+<!-- ── Ayuda ────────────────────────────────────────────────────────── -->
+<div class="section" id="ayuda">
+  <div class="section-title">Ayuda</div>
+  <div class="card" style="line-height:1.8; font-size:0.92rem; color:var(--text-muted);">
+
+    <div style="margin-bottom:1.25rem;">
+      <strong style="color:var(--text); font-size:1rem;">¿Qué es este bot?</strong><br>
+      Es un programa automático que compra y vende Ethereum (ETH) por vos en el exchange Bitso,
+      usando USDT (dólares digitales) como moneda base. Su objetivo es generar pequeñas ganancias
+      aprovechando las subidas y bajadas normales del precio, sin que tengas que estar mirando
+      la pantalla todo el día.
+    </div>
+
+    <div style="margin-bottom:1.25rem;">
+      <strong style="color:var(--text); font-size:1rem;">¿Cómo funciona?</strong><br>
+      El bot trabaja con una estrategia llamada <strong style="color:var(--accent);">grid trading</strong>:
+      coloca órdenes de compra a precios más bajos y órdenes de venta a precios más altos, como una
+      "grilla" alrededor del precio actual. Cada vez que el precio baja y toca un nivel de compra,
+      compra un poco de ETH. Cuando sube y toca un nivel de venta, vende y toma la ganancia.
+      La grilla se recalcula automáticamente cada 15 minutos según la volatilidad del mercado.
+    </div>
+
+    <div style="margin-bottom:1.25rem;">
+      <strong style="color:var(--text); font-size:1rem;">¿Qué significan los indicadores?</strong>
+      <ul style="margin-top:0.4rem; padding-left:1.4rem;">
+        <li><strong style="color:var(--text);">Régimen</strong> — El bot detecta si el mercado está
+          en modo <em>grid</em> (lateral, ideal para operar) o <em>breakout</em> (tendencia fuerte, se queda quieto).</li>
+        <li><strong style="color:var(--text);">ADX</strong> — Mide la fuerza de la tendencia. Si es bajo (&lt;25),
+          el mercado va de lado y el grid funciona mejor. Si es alto, hay tendencia y el bot espera.</li>
+        <li><strong style="color:var(--text);">P&amp;L</strong> — Profit &amp; Loss (ganancia y pérdida).
+          Muestra cuánto ganó o perdió el bot en el día y en total.</li>
+        <li><strong style="color:var(--text);">Drawdown</strong> — La peor caída del capital en el día,
+          en porcentaje. Sirve para medir el riesgo.</li>
+        <li><strong style="color:var(--text);">Win rate</strong> — Porcentaje de ventas que fueron con ganancia.</li>
+      </ul>
+    </div>
+
+    <div style="margin-bottom:1.25rem;">
+      <strong style="color:var(--text); font-size:1rem;">Modos de operación</strong>
+      <ul style="margin-top:0.4rem; padding-left:1.4rem;">
+        <li><strong style="color:var(--blue);">SIMULADOR</strong> — El bot calcula qué haría pero NO ejecuta
+          órdenes reales. Ideal para probar sin riesgo.</li>
+        <li><strong style="color:var(--red);">LIVE</strong> — El bot opera con dinero real en Bitso.
+          Compra y vende ETH de verdad usando tu saldo en USDT.</li>
+      </ul>
+    </div>
+
+    <div>
+      <strong style="color:var(--text); font-size:1rem;">Controles rápidos</strong>
+      <ul style="margin-top:0.4rem; padding-left:1.4rem;">
+        <li><strong style="color:var(--green);">START / STOP</strong> — Enciende o apaga el bot.
+          Cuando está encendido, ejecuta un ciclo cada 15 minutos.</li>
+        <li><strong style="color:var(--text);">Tick</strong> — Ejecuta un solo ciclo manual sin esperar los 15 minutos.</li>
+        <li><strong style="color:var(--text);">Exchange API</strong> — Configurá tus claves de Bitso para operar en real.</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
