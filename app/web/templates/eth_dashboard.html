@@ -48,7 +48,33 @@
   <span id="modeText" style="font-weight:700; min-width:110px; text-align:right;">SIMULADOR</span>
 </div>
 
-<!-- ── Cards de métricas ────────────────────────────────────────────────── -->
+<!-- ── Saldos del exchange (visible en LIVE) ──────────────────────────── -->
+<div id="exchangeBalances" class="card" style="margin-bottom:1.25rem; display:none;">
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:1.5rem;">
+    <div>
+      <div class="card-title">Exchange</div>
+      <span id="balExchange" class="badge badge-accent" style="font-size:0.85rem;">—</span>
+    </div>
+    <div>
+      <div class="card-title">USDT disponible</div>
+      <div class="card-value" id="balUsdt" style="font-size:1.35rem;">$—</div>
+    </div>
+    <div>
+      <div class="card-title">ETH en cartera</div>
+      <div class="card-value" id="balEth" style="font-size:1.35rem;">—</div>
+    </div>
+    <div>
+      <div class="card-title">Valor ETH</div>
+      <div class="card-value" id="balEthVal" style="font-size:1.35rem;">$—</div>
+    </div>
+    <div>
+      <div class="card-title">Portfolio total</div>
+      <div class="card-value" id="balPortfolio" style="font-size:1.35rem; color:var(--accent);">$—</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Cards de métricas (bot interno) ─────────────────────────────────── -->
 <div class="grid-3">
   <div class="card"><div class="card-title">Capital inicial</div><div class="card-value" id="capInit">$—</div></div>
   <div class="card"><div class="card-title">Capital actual</div><div class="card-value" id="capNow">$—</div></div>
@@ -239,7 +265,23 @@ async function onModeToggle() {
   if (d && d.ok !== false) { currentDryRun = d.dry_run; syncModeUI(); setTimeout(() => location.reload(), 800); }
 }
 
-function refreshAll() { loadStatus(); loadTrades(); loadGrid(); loadChart(); }
+// ── Balances del exchange ───────────────────────────────────────────
+async function loadBalances() {
+  try {
+    const d = await (await fetch('/api/eth/balances')).json();
+    const box = document.getElementById('exchangeBalances');
+    if (!d.ok) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    document.getElementById('balExchange').textContent = d.dry_run ? 'SIMULADOR' : 'BITSO LIVE';
+    document.getElementById('balExchange').className = 'badge ' + (d.dry_run ? 'badge-blue' : 'badge-green');
+    document.getElementById('balUsdt').textContent = '$' + Number(d.usdt_available).toFixed(2);
+    document.getElementById('balEth').textContent = Number(d.eth_total).toFixed(6) + ' ETH';
+    document.getElementById('balEthVal').textContent = '$' + Number(d.eth_value_usd).toFixed(2);
+    document.getElementById('balPortfolio').textContent = '$' + Number(d.portfolio_usd).toFixed(2);
+  } catch(e) {}
+}
+
+function refreshAll() { loadStatus(); loadTrades(); loadGrid(); loadChart(); loadBalances(); }
 refreshAll();
 setInterval(refreshAll, REFRESH_MS);
 </script>

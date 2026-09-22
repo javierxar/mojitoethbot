@@ -253,6 +253,59 @@ async def api_mode(request: Request, dry_run: str = Form(...)):
 
 # ── API: correr un tick manual ────────────────────────────────────────────────
 
+@router.get("/api/eth/balances")
+async def api_balances(request: Request):
+    """Devuelve los saldos del exchange real (Bitso) o mock."""
+    try:
+        from app.exchanges.factory import get_exchange_client
+        client = get_exchange_client()
+
+        with db_session() as db:
+            pair = get_setting(db, "trading_pair", config.TRADING_PAIR)
+            dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
+
+        balances = client.get_balances()
+        ticker = client.get_ticker(pair)
+        price = float(ticker.get("last", 0))
+
+        eth_available = 0.0
+        eth_locked = 0.0
+        usdt_available = 0.0
+        usdt_locked = 0.0
+
+        for coin, bal in balances.items():
+            c = coin.lower()
+            if c == "eth":
+                eth_available = bal.get("available", 0)
+                eth_locked = bal.get("locked", 0)
+            elif c in ("usdt", "usd"):
+                usdt_available = bal.get("available", 0)
+                usdt_locked = bal.get("locked", 0)
+
+        eth_total = eth_available + eth_locked
+        eth_value_usd = eth_total * price if price else 0.0
+        portfolio_usd = usdt_available + usdt_locked + eth_value_usd
+
+        return JSONResponse({
+            "ok": True,
+            "dry_run": dry_run,
+            "exchange": type(client).__name__,
+            "eth_available": round(eth_available, 8),
+            "eth_locked": round(eth_locked, 8),
+            "eth_total": round(eth_total, 8),
+            "eth_value_usd": round(eth_value_usd, 2),
+            "usdt_available": round(usdt_available, 2),
+            "usdt_locked": round(usdt_locked, 2),
+            "usdt_total": round(usdt_available + usdt_locked, 2),
+            "portfolio_usd": round(portfolio_usd, 2),
+            "price": price,
+            "pair": pair,
+        })
+    except Exception as exc:
+        logger.exception("[WEB] Error obteniendo balances: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)})
+
+
 @router.post("/api/eth/tick")
 def api_tick(request: Request):
     try:
