@@ -88,3 +88,4 @@ class EthBotState(Base):
     drawdown_pct = Column(Float, nullable=True, default=0.0)
     active_grid_levels = Column(Text, nullable=True)     # JSON con los niveles del grid
     capital = Column(Float, nullable=True)               # capital actual (USD)
+    dry_run = Column(Integer, nullable=False, default=1) # 1=simulado, 0=real

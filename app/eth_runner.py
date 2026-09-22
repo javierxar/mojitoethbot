@@ -333,6 +333,7 @@ def run_eth_tick(manual: bool = False) -> dict:
             total_pnl=round(total_pnl + unrealized_pnl, 4),
             drawdown_pct=round(drawdown_pct * 100, 4),
             active_grid_levels=grid_json, capital=capital,
+            dry_run=1 if dry_run else 0,
         )
         db.add(state)
 

@@ -84,7 +84,10 @@ async def index():
 async def dashboard(request: Request):
     with db_session() as db:
         ctx = _base_ctx(request, db)
-        last_state = db.query(EthBotState).order_by(desc(EthBotState.timestamp)).first()
+        dry_flag = 1 if ctx["dry_run"] else 0
+        last_state = db.query(EthBotState).filter(
+            EthBotState.dry_run == dry_flag
+        ).order_by(desc(EthBotState.timestamp)).first()
         ctx.update({
             "state": last_state,
             "capital_initial": float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD))),
@@ -100,9 +103,12 @@ async def dashboard(request: Request):
 @router.get("/api/eth/status")
 async def api_status(request: Request):
     with db_session() as db:
-        state = db.query(EthBotState).order_by(desc(EthBotState.timestamp)).first()
         bot_status = get_setting(db, "bot_status", config.BOT_STATUS)
         dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
+        dry_flag = 1 if dry_run else 0
+        state = db.query(EthBotState).filter(
+            EthBotState.dry_run == dry_flag
+        ).order_by(desc(EthBotState.timestamp)).first()
         capital_initial = float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD)))
         if not state:
             return JSONResponse({
@@ -154,7 +160,11 @@ async def api_trades(request: Request):
 @router.get("/api/eth/grid")
 async def api_grid(request: Request):
     with db_session() as db:
-        state = db.query(EthBotState).order_by(desc(EthBotState.timestamp)).first()
+        dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
+        dry_flag = 1 if dry_run else 0
+        state = db.query(EthBotState).filter(
+            EthBotState.dry_run == dry_flag
+        ).order_by(desc(EthBotState.timestamp)).first()
         if not state or not state.active_grid_levels:
             return JSONResponse({"buy_levels": [], "sell_levels": [], "amount_per_level": 0.0,
                                  "current_price": state.current_price if state else None})
@@ -189,8 +199,11 @@ async def api_candles(request: Request):
 async def api_history(request: Request):
     """Últimos snapshots de estado (capital / precio) — ~24h a 15min = 96 puntos."""
     with db_session() as db:
+        dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
+        dry_flag = 1 if dry_run else 0
         rows = (
             db.query(EthBotState)
+            .filter(EthBotState.dry_run == dry_flag)
             .order_by(desc(EthBotState.timestamp))
             .limit(96)
             .all()

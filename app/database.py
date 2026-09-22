@@ -39,7 +39,7 @@ def init_db() -> None:
 def _migrate_columns() -> None:
     """Agrega columnas nuevas a tablas existentes sin borrar datos (SQLite ALTER TABLE)."""
     migrations: list[str] = [
-        # Reservado para futuras migraciones ligeras del bot ETH.
+        "ALTER TABLE eth_bot_state ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 1",
     ]
     with engine.connect() as conn:
         for sql in migrations:
