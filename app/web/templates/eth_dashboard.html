@@ -76,8 +76,8 @@
 
 <!-- ── Cards de métricas (bot interno) ─────────────────────────────────── -->
 <div class="grid-3">
-  <div class="card"><div class="card-title">Capital inicial</div><div class="card-value" id="capInit">$—</div></div>
-  <div class="card"><div class="card-title">Capital actual</div><div class="card-value" id="capNow">$—</div></div>
+  <div class="card" id="cardCapInit"><div class="card-title">Capital inicial</div><div class="card-value" id="capInit">$—</div></div>
+  <div class="card"><div class="card-title" id="capNowTitle">Capital actual</div><div class="card-value" id="capNow">$—</div></div>
   <div class="card"><div class="card-title">P&amp;L hoy</div><div class="card-value" id="pnlToday">$—</div></div>
   <div class="card"><div class="card-title">P&amp;L total</div><div class="card-value" id="pnlTotal">$—</div></div>
   <div class="card"><div class="card-title">Win rate</div><div class="card-value" id="winRate">—%</div></div>
@@ -278,6 +278,15 @@ async function loadBalances() {
     document.getElementById('balEth').textContent = Number(d.eth_total).toFixed(6) + ' ETH';
     document.getElementById('balEthVal').textContent = '$' + Number(d.eth_value_usd).toFixed(2);
     document.getElementById('balPortfolio').textContent = '$' + Number(d.portfolio_usd).toFixed(2);
+
+    if (!d.dry_run) {
+      document.getElementById('cardCapInit').style.display = 'none';
+      document.getElementById('capNowTitle').textContent = 'Portfolio exchange';
+      document.getElementById('capNow').textContent = '$' + Number(d.portfolio_usd).toFixed(2);
+    } else {
+      document.getElementById('cardCapInit').style.display = '';
+      document.getElementById('capNowTitle').textContent = 'Capital actual';
+    }
   } catch(e) {}
 }
 
