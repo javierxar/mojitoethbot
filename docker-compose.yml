@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  eth-bot:
+    build: .
+    container_name: eth-bot
+    ports:
+      - "${PORT:-7001}:7001"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

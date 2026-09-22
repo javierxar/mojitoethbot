@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}ETH DGT Bot{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d1117;
+      --surface:     #161b22;
+      --surface2:    #1c2128;
+      --border:      #30363d;
+      --text:        #e6edf3;
+      --text-muted:  #8b949e;
+      --accent:      #627eea;   /* ETH blue */
+      --accent-dk:   #4a63c8;
+      --green:       #3fb950;
+      --red:         #f85149;
+      --yellow:      #d29922;
+      --blue:        #388bfd;
+      --purple:      #a371f7;
+      --sidebar-w:   260px;
+      --topbar-h:    62px;
+      --radius:      8px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .app-wrapper { display: flex; min-height: 100vh; }
+
+    #sidebar {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      position: sticky; top: 0; height: 100vh;
+      overflow-y: auto; flex-shrink: 0; z-index: 200;
+    }
+    .sidebar-brand {
+      padding: 1.25rem 1.1rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .eth-logo { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+    .eth-logo .a { color: var(--accent); }
+    .eth-logo .b { color: var(--text); }
+    .eth-logo .sub { color: var(--text-muted); font-weight: 600; font-size: 1.1rem; }
+
+    .sidebar-pills {
+      display: flex; flex-wrap: wrap; gap: 0.3rem;
+      padding: 0.65rem 1.1rem; border-bottom: 1px solid var(--border);
+    }
+    .status-pill {
+      font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em;
+      padding: 0.18rem 0.5rem; border-radius: 20px; text-transform: uppercase;
+    }
+    .pill-on    { background: rgba(63,185,80,0.15);   color: var(--green);      border: 1px solid rgba(63,185,80,0.4); }
+    .pill-off   { background: rgba(139,148,158,0.15); color: var(--text-muted); border: 1px solid rgba(139,148,158,0.3); }
+    .pill-dry   { background: rgba(56,139,253,0.15);  color: var(--blue);       border: 1px solid rgba(56,139,253,0.35); }
+    .pill-live  { background: rgba(248,81,73,0.15);   color: var(--red);        border: 1px solid rgba(248,81,73,0.4); }
+
+    .sidebar-nav { flex: 1; padding: 0.75rem 0.6rem; display: flex; flex-direction: column; gap: 0.15rem; }
+    .nav-label {
+      font-size: 0.72rem; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.08em; padding: 0.5rem 0.6rem 0.25rem;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 0.7rem;
+      padding: 0.65rem 0.9rem; border-radius: var(--radius);
+      color: var(--text-muted); font-size: 1rem; font-weight: 500;
+      transition: background 0.15s, color 0.15s; cursor: pointer;
+    }
+    .nav-item:hover { background: var(--surface2); color: var(--text); text-decoration: none; }
+    .nav-item.active { background: rgba(98,126,234,0.14); color: var(--accent); font-weight: 600; }
+    .nav-item .nav-icon { font-size: 1rem; width: 1.1rem; text-align: center; }
+
+    .sidebar-footer {
+      padding: 0.9rem 1.2rem; border-top: 1px solid var(--border);
+      font-size: 0.875rem; color: var(--text-muted);
+    }
+    .sidebar-footer .user-line { display: flex; align-items: center; justify-content: space-between; }
+    .sidebar-footer a { color: var(--text-muted); font-size: 0.875rem; }
+    .sidebar-footer a:hover { color: var(--red); }
+
+    #content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+    .topbar {
+      height: var(--topbar-h); background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 1.5rem; gap: 1rem;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .topbar-toggle { display: none; background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; padding: 0.25rem; }
+    .topbar-title { font-size: 1.05rem; font-weight: 600; color: var(--text); flex: 1; }
+    .topbar-ver { font-size: 0.8rem; color: var(--text-muted); background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 0.2rem 0.65rem; }
+
+    .warn-banner {
+      background: rgba(248,81,73,0.1); border-bottom: 1px solid rgba(248,81,73,0.35);
+      color: var(--red); padding: 0.55rem 1.5rem;
+      display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem;
+    }
+
+    main { flex: 1; padding: 1.5rem; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+    .card-title { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 0.5rem; }
+    .card-value { font-size: 1.75rem; font-weight: 700; color: var(--text); }
+    .card-sub   { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    @media(max-width:900px) { .grid-4,.grid-3 { grid-template-columns: repeat(2,1fr); } }
+    @media(max-width:540px) { .grid-4,.grid-3,.grid-2 { grid-template-columns: 1fr; } }
+
+    .section { margin-top: 1.5rem; }
+    .section-title {
+      font-size: 0.85rem; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.07em;
+      margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+    }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th { background: var(--surface2); color: var(--text-muted); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+    td { padding: 0.7rem 1rem; border-bottom: 1px solid rgba(48,54,61,0.6); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+
+    .badge { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 0.2rem 0.55rem; border-radius: 4px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .badge-green  { background: rgba(63,185,80,0.15);  color: var(--green); }
+    .badge-red    { background: rgba(248,81,73,0.15);  color: var(--red); }
+    .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+    .badge-blue   { background: rgba(56,139,253,0.15); color: var(--blue); }
+    .badge-gray   { background: rgba(139,148,158,0.15);color: var(--text-muted); }
+    .badge-accent { background: rgba(98,126,234,0.15); color: var(--accent); }
+    .badge-purple { background: rgba(163,113,247,0.15);color: var(--purple); }
+
+    .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; border-radius: var(--radius); font-size: 0.95rem; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary   { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-primary:hover { background: var(--accent-dk); }
+    .btn-secondary { background: transparent; color: var(--text); border-color: var(--border); }
+    .btn-secondary:hover { background: var(--surface2); }
+    .btn-success   { background: var(--green); color: #fff; border-color: var(--green); }
+    .btn-danger    { background: transparent; color: var(--red); border-color: rgba(248,81,73,0.4); }
+    .btn-danger:hover { background: rgba(248,81,73,0.1); }
+    .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; }
+
+    .form-group { margin-bottom: 1rem; }
+    label.form-label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+    input[type=text], input[type=number], input[type=password], select {
+      width: 100%; background: #0d1117; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-size: 1rem; padding: 0.65rem 0.9rem; outline: none; transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(98,126,234,0.12); }
+
+    .var-pos { color: var(--green); }
+    .var-neg { color: var(--red); }
+    .var-neu { color: var(--text-muted); }
+
+    #toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 999;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 0.75rem 1.25rem; font-size: 0.88rem; max-width: 360px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4); opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    #toast.show { opacity: 1; pointer-events: auto; }
+    #toast.ok  { border-color: rgba(63,185,80,0.5); color: var(--green); }
+    #toast.err { border-color: rgba(248,81,73,0.5); color: var(--red); }
+
+    /* Toggle switch */
+    .switch { position: relative; display: inline-block; width: 52px; height: 28px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: var(--border); transition: .2s; border-radius: 28px; }
+    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background: #fff; transition: .2s; border-radius: 50%; }
+    input:checked + .slider { background: var(--red); }
+    input:checked + .slider:before { transform: translateX(24px); }
+
+    @media(max-width: 768px) {
+      #sidebar { position: fixed; left: -100%; transition: left 0.25s ease; }
+      #sidebar.open { left: 0; }
+      .topbar-toggle { display: block; }
+      .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 199; }
+      .sidebar-overlay.show { display: block; }
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+
+<div class="app-wrapper">
+  <nav id="sidebar">
+    <a href="/dashboard" class="sidebar-brand" style="text-decoration:none;">
+      <svg width="30" height="30" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+        <circle cx="16" cy="16" r="16" fill="#627EEA"/>
+        <g fill="#fff" fill-rule="nonzero">
+          <path fill-opacity=".6" d="M16.498 4v8.87l7.497 3.35z"/>
+          <path d="M16.498 4L9 16.22l7.498-3.35z"/>
+          <path fill-opacity=".6" d="M16.498 21.968v6.027L24 17.616z"/>
+          <path d="M16.498 27.995v-6.028L9 17.616z"/>
+          <path fill-opacity=".2" d="M16.498 20.573l7.497-4.353-7.497-3.348z"/>
+          <path fill-opacity=".6" d="M9 16.22l7.498 4.353v-7.701z"/>
+        </g>
+      </svg>
+      <span class="eth-logo"><span class="a">eth</span><span class="b">dgt</span> <span class="sub">bot</span></span>
+    </a>
+
+    <div class="sidebar-pills">
+      {% if bot_status == 'on' %}<span class="status-pill pill-on">ON</span>{% else %}<span class="status-pill pill-off">OFF</span>{% endif %}
+      {% if dry_run %}<span class="status-pill pill-dry">SIM</span>{% else %}<span class="status-pill pill-live">LIVE</span>{% endif %}
+    </div>
+
+    <div class="sidebar-nav">
+      <div class="nav-label">Principal</div>
+      <a href="/dashboard" class="nav-item {% if request.url.path == '/dashboard' %}active{% endif %}">
+        <span class="nav-icon">📊</span> Dashboard
+      </a>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-line">
+        <span>{{ username }}</span>
+        <a href="/auth/logout" title="Salir">⏏ Salir</a>
+      </div>
+      <div style="margin-top:0.3rem; font-size:0.7rem; color:var(--text-muted);">v{{ bot_version }} · {{ trading_pair }}</div>
+    </div>
+  </nav>
+
+  <div id="content">
+    <div class="topbar">
+      <button class="topbar-toggle" onclick="toggleSidebar()" title="Menú">☰</button>
+      <span class="topbar-title">{% block topbar_title %}ETH DGT Bot{% endblock %}</span>
+      <span class="topbar-ver">v{{ bot_version }}</span>
+    </div>
+
+    {% if not dry_run %}
+    <div class="warn-banner">
+      🔴 <strong>MODO LIVE</strong> — el bot ejecuta órdenes reales en el exchange. Operá con cuidado.
+    </div>
+    {% endif %}
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+function toast(msg, ok=true) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (ok ? 'ok' : 'err');
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => t.className = '', 3500);
+}
+async function apiPost(url, body=null, label='OK') {
+  try {
+    const opts = {method:'POST'};
+    if (body) { opts.body = body; }
+    const r = await fetch(url, opts);
+    const d = await r.json();
+    if (d.ok !== false) toast(label + ' ✓');
+    else toast('Error: ' + (d.error || 'desconocido'), false);
+    return d;
+  } catch(e) { toast('Error de red', false); return null; }
+}
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('overlay').classList.toggle('show'); }
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('overlay').classList.remove('show'); }
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

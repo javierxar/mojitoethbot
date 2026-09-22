@@ -1,0 +1,40 @@
+# Entorno
+.env
+.env.local
+
+# Base de datos
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/*.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

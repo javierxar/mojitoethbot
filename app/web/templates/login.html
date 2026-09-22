@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — ETH DGT Bot</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117; color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .login-card {
+      background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      padding: 2.25rem 2rem; width: 100%; max-width: 380px;
+    }
+    .brand { display: flex; align-items: center; gap: 0.6rem; justify-content: center; margin-bottom: 1.75rem; }
+    .brand .name { font-size: 1.35rem; font-weight: 800; }
+    .brand .name .a { color: #627eea; } .brand .name .b { color: #e6edf3; }
+    label { display: block; font-size: 0.82rem; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+    input { width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 1rem; padding: 0.7rem 0.9rem; outline: none; margin-bottom: 1.1rem; }
+    input:focus { border-color: #627eea; box-shadow: 0 0 0 3px rgba(98,126,234,0.12); }
+    button { width: 100%; background: #627eea; color: #fff; border: none; border-radius: 6px; font-size: 1rem; font-weight: 700; padding: 0.75rem; cursor: pointer; }
+    button:hover { background: #4a63c8; }
+    .error { background: rgba(248,81,73,0.1); border: 1px solid rgba(248,81,73,0.35); color: #f85149; padding: 0.6rem 0.9rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1.1rem; }
+  </style>
+</head>
+<body>
+  <form class="login-card" method="post" action="/login">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="16" fill="#627EEA"/>
+        <g fill="#fff" fill-rule="nonzero">
+          <path fill-opacity=".6" d="M16.498 4v8.87l7.497 3.35z"/>
+          <path d="M16.498 4L9 16.22l7.498-3.35z"/>
+          <path fill-opacity=".6" d="M16.498 21.968v6.027L24 17.616z"/>
+          <path d="M16.498 27.995v-6.028L9 17.616z"/>
+        </g>
+      </svg>
+      <span class="name"><span class="a">eth</span><span class="b">dgt</span> bot</span>
+    </div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <label for="username">Usuario</label>
+    <input type="text" id="username" name="username" autofocus required>
+    <label for="password">Contraseña</label>
+    <input type="password" id="password" name="password" required>
+    <button type="submit">Ingresar</button>
+  </form>
+</body>
+</html>
