@@ -222,15 +222,8 @@ def _execute_live(db, decision, client) -> None:
     inv, avg_cost = _inventory_and_cost(db, dry_run=False)
     price = decision.current_price
 
-    try:
-        if decision.action in ("grid", "buy") and decision.amount_usd > 0:
-            quote_amount = _usd_to_quote(client, pair, decision.amount_usd)
-            order = client.place_market_buy(pair, quote_amount)
-            eth = order.get("eth_amount", 0.0) or (decision.amount_usd / price if price else 0.0)
-            _record_trade(db, "buy", order.get("price", price) or price, eth,
-                          decision.amount_usd, 0.0, decision.strategy, dry_run=False,
-                          order_id=order.get("order_id"), status=order.get("status", "filled"))
-        elif decision.action == "sell" and inv > 0:
+    if decision.action == "sell" and inv > 0:
+        try:
             order = client.place_market_sell(pair, inv)
             eth = order.get("eth_amount", inv)
             fill_price = order.get("price", price) or price
@@ -238,8 +231,127 @@ def _execute_live(db, decision, client) -> None:
             _record_trade(db, "sell", fill_price, eth, eth * fill_price, pnl,
                           decision.strategy, dry_run=False,
                           order_id=order.get("order_id"), status=order.get("status", "filled"))
-    except Exception as exc:
-        logger.exception("[ETH] Error ejecutando orden real: %s", exc)
+        except Exception as exc:
+            logger.exception("[ETH] Error en venta live: %s", exc)
+        return
+
+    if decision.action == "buy" and decision.amount_usd > 0:
+        try:
+            quote_amount = _usd_to_quote(client, pair, decision.amount_usd)
+            order = client.place_market_buy(pair, quote_amount)
+            eth = order.get("eth_amount", 0.0) or (decision.amount_usd / price if price else 0.0)
+            _record_trade(db, "buy", order.get("price", price) or price, eth,
+                          decision.amount_usd, 0.0, decision.strategy, dry_run=False,
+                          order_id=order.get("order_id"), status=order.get("status", "filled"))
+        except Exception as exc:
+            logger.exception("[ETH] Error en compra live: %s", exc)
+        return
+
+    if decision.action == "grid" and decision.grid:
+        _execute_live_grid(db, decision, client, pair, inv, avg_cost)
+
+
+def _execute_live_grid(db, decision, client, pair: str, inv: float, avg_cost: float) -> None:
+    grid = decision.grid
+    amount_usd = grid.get("amount_per_level", 0)
+    if amount_usd <= 0:
+        return
+
+    last_candle = db.query(EthCandle).order_by(desc(EthCandle.timestamp)).first()
+    if not last_candle:
+        return
+
+    prev_state = db.query(EthBotState).filter(
+        EthBotState.dry_run == 0
+    ).order_by(desc(EthBotState.timestamp)).first()
+    active_grid = grid
+    has_prev_grid = False
+    if prev_state and prev_state.active_grid_levels:
+        try:
+            stored = json.loads(prev_state.active_grid_levels)
+            if stored.get("buy_levels") or stored.get("sell_levels"):
+                active_grid = stored
+                amount_usd = stored.get("amount_per_level", amount_usd)
+                has_prev_grid = True
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    candle_low = last_candle.low
+    candle_high = last_candle.high
+
+    balances = client.get_balances()
+    usdt_available = 0.0
+    for coin, bal in balances.items():
+        if coin.lower() in ("usdt", "usd"):
+            usdt_available = bal.get("available", 0)
+
+    bought_count = 0
+
+    if not has_prev_grid:
+        buy_levels = active_grid.get("buy_levels", [])
+        if buy_levels and amount_usd > 0 and usdt_available >= amount_usd:
+            top_buy = max(buy_levels)
+            try:
+                quote_amount = _usd_to_quote(client, pair, amount_usd)
+                order = client.place_market_buy(pair, quote_amount)
+                eth = order.get("eth_amount", 0.0) or (amount_usd / top_buy)
+                _record_trade(db, "buy", order.get("price", top_buy) or top_buy, eth,
+                              amount_usd, 0.0, "grid", dry_run=False,
+                              order_id=order.get("order_id"), status=order.get("status", "filled"))
+                usdt_available -= amount_usd
+                bought_count += 1
+                logger.info("[ETH] Grid INICIAL live: compra en nivel %.2f", top_buy)
+            except Exception as exc:
+                logger.error("[ETH] Error en compra grid inicial live: %s", exc)
+    else:
+        for level in sorted(active_grid.get("buy_levels", []), reverse=True):
+            if usdt_available < amount_usd:
+                logger.info("[ETH] Sin saldo USDT suficiente ($%.2f < $%.2f), saltando compras",
+                            usdt_available, amount_usd)
+                break
+            if candle_low <= level and amount_usd > 0:
+                try:
+                    quote_amount = _usd_to_quote(client, pair, amount_usd)
+                    order = client.place_market_buy(pair, quote_amount)
+                    eth = order.get("eth_amount", 0.0) or (amount_usd / level)
+                    _record_trade(db, "buy", order.get("price", level) or level, eth,
+                                  amount_usd, 0.0, "grid", dry_run=False,
+                                  order_id=order.get("order_id"), status=order.get("status", "filled"))
+                    usdt_available -= amount_usd
+                    bought_count += 1
+                    logger.info("[ETH] Grid BUY live: low=%.2f tocó nivel %.2f", candle_low, level)
+                except Exception as exc:
+                    logger.error("[ETH] Error en compra grid live nivel %.2f: %s", level, exc)
+                    break
+
+    if bought_count > 0:
+        inv, avg_cost = _inventory_and_cost(db, dry_run=False)
+
+    sell_count = 0
+    for level in sorted(active_grid.get("sell_levels", [])):
+        if candle_high >= level and inv > 0:
+            eth_to_sell = min(amount_usd / level, inv)
+            try:
+                order = client.place_market_sell(pair, eth_to_sell)
+                eth = order.get("eth_amount", eth_to_sell)
+                fill_price = order.get("price", level) or level
+                pnl = (fill_price - avg_cost) * eth
+                _record_trade(db, "sell", fill_price, eth, eth * fill_price, pnl,
+                              "grid", dry_run=False,
+                              order_id=order.get("order_id"), status=order.get("status", "filled"))
+                inv -= eth
+                sell_count += 1
+                logger.info("[ETH] Grid SELL live: high=%.2f tocó nivel %.2f", candle_high, level)
+            except Exception as exc:
+                logger.error("[ETH] Error en venta grid live nivel %.2f: %s", level, exc)
+                break
+            if inv <= 0:
+                break
+
+    if bought_count > 0 or sell_count > 0:
+        logger.info("[ETH] Grid live tick: %d compras, %d ventas", bought_count, sell_count)
+    else:
+        logger.info("[ETH] Grid live tick: sin órdenes (USDT=$%.2f, inv=%.6f ETH)", usdt_available, inv)
 
 
 def _usd_to_quote(client, pair: str, amount_usd: float) -> float:
