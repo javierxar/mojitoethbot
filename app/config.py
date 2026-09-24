@@ -66,8 +66,8 @@ CANDLE_LIMIT: int = _get_int("CANDLE_LIMIT", 200)
 # ─── Estrategia DGT ──────────────────────────────────────────────────────────
 # Capital simulado inicial (USD)
 ETH_CAPITAL_USD: float = _get_float("ETH_CAPITAL_USD", 100.0)
-# Cantidad de niveles del grid
-ETH_GRID_LEVELS: int = _get_int("ETH_GRID_LEVELS", 10)
+# Cantidad de niveles del grid (menos niveles = más ganancia por operación)
+ETH_GRID_LEVELS: int = _get_int("ETH_GRID_LEVELS", 5)
 # Rango total del grid como fracción (0.06 = ±3%)
 ETH_GRID_RANGE_PCT: float = _get_float("ETH_GRID_RANGE_PCT", 0.06)
 # Umbral de ADX para separar régimen grid (<25) de breakout (>=25)
@@ -92,7 +92,11 @@ PROFIT_TAKE_SELL_RATIO: float = _get_float("PROFIT_TAKE_SELL_RATIO", 0.20)
 MAX_INVENTORY_COST_PCT: float = _get_float("MAX_INVENTORY_COST_PCT", 0.80)
 # Grid dinámico basado en ATR: range = ATR/precio * multiplicador, acotado
 GRID_ATR_MULTIPLIER: float = _get_float("GRID_ATR_MULTIPLIER", 3.0)
-GRID_RANGE_MIN_PCT: float = _get_float("GRID_RANGE_MIN_PCT", 0.03)
+GRID_RANGE_MIN_PCT: float = _get_float("GRID_RANGE_MIN_PCT", 0.05)
+# Fee taker de Bitso por lado (0.3586% medido en eth_usdt)
+TAKER_FEE_PCT: float = _get_float("TAKER_FEE_PCT", 0.0036)
+# Ganancia mínima sobre costo + fees al fijar niveles de venta del inventario
+GRID_MIN_MARGIN_PCT: float = _get_float("GRID_MIN_MARGIN_PCT", 0.002)
 GRID_RANGE_MAX_PCT: float = _get_float("GRID_RANGE_MAX_PCT", 0.12)
 PROFIT_TAKE_COOLDOWN_HOURS: float = _get_float("PROFIT_TAKE_COOLDOWN_HOURS", 4.0)
 
