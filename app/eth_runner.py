@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from sqlalchemy import desc
 
 from app import config
-from app.database import db_session, get_setting
+from app.database import db_session, get_setting, set_setting
 from app.eth_cache import cache_get, cache_set
 from app.models import EthBotState, EthCandle, EthTrade
 from app.strategy_eth import EthStrategyEngine
@@ -474,6 +474,17 @@ def _execute_live_grid(db, decision, client, pair: str, inv: float, avg_cost: fl
     }
 
 
+def set_live_baseline(db, usdt: float, eth: float, price: float, since: datetime | None = None) -> dict:
+    """Punto de partida para medir resultados reales (se reinicia tras depósitos/retiros)."""
+    baseline = {
+        "since": (since or datetime.utcnow()).isoformat(),
+        "usdt": round(usdt, 8), "eth": round(eth, 8), "price": round(price, 2),
+        "value": round(usdt + eth * price, 4),
+    }
+    set_setting(db, "live_baseline", json.dumps(baseline))
+    return baseline
+
+
 def _usd_to_quote(client, pair: str, amount_usd: float) -> float:
     if pair.endswith("_usd") or pair.endswith("_usdt"):
         return round(amount_usd, 2)
@@ -557,6 +568,15 @@ def run_eth_tick(manual: bool = False) -> dict:
         inv, avg_cost = _inventory_and_cost(db, dry_run)
         unrealized_pnl = (decision.current_price - avg_cost) * inv if inv > 0 and avg_cost > 0 else 0.0
         capital = round(base_capital + total_pnl + unrealized_pnl, 4)
+        if not dry_run:
+            # En LIVE el capital es el valor real del portfolio en el exchange
+            try:
+                usdt_bal, eth_bal = _get_exchange_balances(client)
+                capital = round(usdt_bal + eth_bal * decision.current_price, 4)
+                if get_setting(db, "live_baseline") is None:
+                    set_live_baseline(db, usdt_bal, eth_bal, decision.current_price)
+            except Exception as exc:
+                logger.warning("[ETH] No se pudo leer saldo para valuar portfolio: %s", exc)
 
         # 6. Guardar estado
         grid_json = json.dumps(decision.grid) if decision.grid else None

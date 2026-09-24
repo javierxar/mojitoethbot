@@ -4,7 +4,7 @@ Rutas del dashboard web del ETH bot — protegidas por AuthMiddleware.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -65,12 +65,35 @@ def _base_ctx(request: Request, db) -> dict:
     }
 
 
-def _win_rate(trades) -> float:
-    sells = [t for t in trades if t.side == "sell"]
-    if not sells:
-        return 0.0
-    wins = sum(1 for t in sells if (t.pnl or 0) > 0)
-    return round(wins / len(sells) * 100, 1)
+def _fee_rate(dry_run: bool) -> float:
+    # El simulador no modela comisiones; en LIVE se estiman con el fee taker de Bitso
+    return 0.0 if dry_run else config.TAKER_FEE_PCT
+
+
+def _trade_net(t, fee_rate: float) -> tuple[float, float]:
+    """(comisión, resultado neto) de un trade. Las compras solo aportan su comisión."""
+    fee = (t.amount_usd or 0.0) * fee_rate
+    gross = (t.pnl or 0.0) if t.side == "sell" else 0.0
+    return fee, gross - fee
+
+
+def _baseline(db, dry_run: bool) -> dict | None:
+    """Punto de partida para medir resultados: {since(datetime UTC), usdt, eth, value}."""
+    if dry_run:
+        first = db.query(EthBotState).filter(EthBotState.dry_run == 1) \
+            .order_by(EthBotState.timestamp).first()
+        cap = float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD)))
+        return {"since": first.timestamp if first else datetime.utcnow(),
+                "usdt": cap, "eth": 0.0, "value": cap}
+    raw = get_setting(db, "live_baseline")
+    if not raw:
+        return None
+    try:
+        b = json.loads(raw)
+        b["since"] = datetime.fromisoformat(b["since"])
+        return b
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -110,12 +133,16 @@ async def api_status(request: Request):
             EthBotState.dry_run == dry_flag
         ).order_by(desc(EthBotState.timestamp)).first()
         capital_initial = float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD)))
+        from app.scheduler import get_next_tick_time
+        next_tick = get_next_tick_time()
+        next_tick = next_tick.isoformat() if next_tick else None
         if not state:
             return JSONResponse({
                 "regime": None, "adx": None, "price": None,
                 "capital": capital_initial, "capital_initial": capital_initial,
                 "daily_pnl": 0.0, "total_pnl": 0.0, "drawdown_pct": 0.0,
                 "bot_status": bot_status, "dry_run": dry_run, "updated_at": None,
+                "next_tick": next_tick,
             })
         return JSONResponse({
             "regime": state.regime,
@@ -129,6 +156,7 @@ async def api_status(request: Request):
             "bot_status": bot_status,
             "dry_run": dry_run,
             "updated_at": _localtime(state.timestamp).isoformat() if state.timestamp else None,
+            "next_tick": next_tick,
         })
 
 
@@ -145,14 +173,125 @@ async def api_trades(request: Request):
             .limit(50)
             .all()
         )
-        trades = [{
-            "timestamp": _localtime(t.timestamp).strftime("%d/%m %H:%M") if t.timestamp else "",
-            "side": t.side, "price": t.price,
-            "amount_eth": t.amount_eth, "amount_usd": t.amount_usd,
-            "pnl": t.pnl, "strategy": t.strategy, "status": t.status,
-        } for t in rows]
-        win_rate = _win_rate(rows)
-    return JSONResponse({"trades": trades, "win_rate": win_rate, "count": len(trades)})
+        fee_rate = _fee_rate(dry_run)
+        trades = []
+        for t in rows:
+            fee, net = _trade_net(t, fee_rate)
+            trades.append({
+                "timestamp": _localtime(t.timestamp).strftime("%d/%m %H:%M") if t.timestamp else "",
+                "ts_iso": t.timestamp.replace(tzinfo=timezone.utc).isoformat() if t.timestamp else None,
+                "side": t.side, "price": t.price,
+                "amount_eth": t.amount_eth, "amount_usd": t.amount_usd,
+                "pnl": t.pnl, "fee": round(fee, 4), "net": round(net, 4),
+                "strategy": t.strategy, "status": t.status,
+            })
+    return JSONResponse({"trades": trades, "count": len(trades)})
+
+
+# ── API: rendimiento (hoy / día a día / histórico) ────────────────────────────
+
+@router.get("/api/eth/performance")
+async def api_performance(request: Request):
+    with db_session() as db:
+        dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
+        flag = 1 if dry_run else 0
+        base = _baseline(db, dry_run)
+        if base is None:
+            return JSONResponse({"ready": False, "dry_run": dry_run})
+        since = base["since"]
+        states = (db.query(EthBotState.timestamp, EthBotState.capital, EthBotState.current_price)
+                  .filter(EthBotState.dry_run == flag, EthBotState.timestamp >= since)
+                  .order_by(EthBotState.timestamp).all())
+        trades = (db.query(EthTrade)
+                  .filter(EthTrade.dry_run == flag, EthTrade.timestamp >= since)
+                  .order_by(EthTrade.timestamp).all())
+
+    fee_rate = _fee_rate(dry_run)
+    days: dict = {}
+
+    def _day(ts):
+        d = _localtime(ts).date()
+        return days.setdefault(d, {"close_value": None, "eth_price": None, "buys": 0, "sells": 0,
+                                   "bot_net": 0.0, "fees": 0.0})
+
+    for ts, cap, price in states:
+        if cap is None:
+            continue
+        day = _day(ts)
+        day["close_value"] = cap
+        day["eth_price"] = price
+
+    wins = 0
+    for t in trades:
+        day = _day(t.timestamp)
+        fee, net = _trade_net(t, fee_rate)
+        day["fees"] += fee
+        day["bot_net"] += net
+        if t.side == "buy":
+            day["buys"] += 1
+        else:
+            day["sells"] += 1
+            wins += 1 if net > 0 else 0
+
+    start_value = base["value"]
+    prev = start_value
+    rows = []
+    for d in sorted(days):
+        day = days[d]
+        close = day["close_value"] if day["close_value"] is not None else prev
+        change = close - prev
+        rows.append({
+            "date": d.isoformat(), "close_value": round(close, 4), "eth_price": day["eth_price"],
+            "change": round(change, 4), "change_pct": round(change / prev * 100, 3) if prev else 0.0,
+            "buys": day["buys"], "sells": day["sells"],
+            "bot_net": round(day["bot_net"], 4), "fees": round(day["fees"], 4),
+        })
+        prev = close
+
+    last_price = next((p for _, c, p in reversed(states) if p), base.get("price") or 0.0)
+    current_value = rows[-1]["close_value"] if rows else start_value
+    hold_value = base["usdt"] + base["eth"] * last_price
+    today_iso = _localtime(datetime.utcnow()).date().isoformat()
+    today = next((r for r in rows if r["date"] == today_iso), None)
+    n_sells = sum(r["sells"] for r in rows)
+
+    return JSONResponse({
+        "ready": True, "dry_run": dry_run,
+        "since": _localtime(since).strftime("%d/%m/%Y %H:%M"),
+        "start_value": round(start_value, 2),
+        "current_value": round(current_value, 4),
+        "total_change": round(current_value - start_value, 4),
+        "total_change_pct": round((current_value - start_value) / start_value * 100, 3) if start_value else 0.0,
+        "hold_value": round(hold_value, 2),
+        "vs_hold": round(current_value - hold_value, 4),
+        "bot_net": round(sum(r["bot_net"] for r in rows), 4),
+        "fees": round(sum(r["fees"] for r in rows), 4),
+        "trades": len(trades), "sells": n_sells,
+        "win_rate": round(wins / n_sells * 100, 1) if n_sells else None,
+        "today": today or {"date": today_iso, "change": 0.0, "change_pct": 0.0,
+                           "buys": 0, "sells": 0, "bot_net": 0.0, "fees": 0.0},
+        "days": list(reversed(rows)),
+    })
+
+
+@router.post("/api/eth/baseline/reset")
+async def api_baseline_reset(request: Request):
+    """Reinicia el punto de partida LIVE (usar después de depositar o retirar fondos)."""
+    try:
+        from app.eth_runner import _get_exchange_balances, set_live_baseline
+        from app.exchanges.factory import get_exchange_client
+        client = get_exchange_client()
+        with db_session() as db:
+            pair = get_setting(db, "trading_pair", config.TRADING_PAIR)
+        usdt, eth = _get_exchange_balances(client)
+        price = float(client.get_ticker(pair).get("last", 0))
+        with db_session() as db:
+            baseline = set_live_baseline(db, usdt, eth, price)
+        logger.info("[WEB] Punto de partida LIVE reiniciado: $%.2f", baseline["value"])
+        return JSONResponse({"ok": True, "baseline": baseline})
+    except Exception as exc:
+        logger.exception("[WEB] Error reiniciando punto de partida: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 # ── API: grid ─────────────────────────────────────────────────────────────────
@@ -196,24 +335,33 @@ async def api_candles(request: Request):
 # ── API: historial de capital (para el gráfico) ───────────────────────────────
 
 @router.get("/api/eth/history")
-async def api_history(request: Request):
-    """Últimos snapshots de estado (capital / precio) — ~24h a 15min = 96 puntos."""
+async def api_history(request: Request, days: int = 1):
+    """Valor del portfolio vs. 'no operar' en los últimos `days` días (0 = desde el inicio)."""
     with db_session() as db:
         dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
-        dry_flag = 1 if dry_run else 0
+        base = _baseline(db, dry_run)
+        if base is None:
+            return JSONResponse({"points": []})
+        since = base["since"]
+        if days > 0:
+            since = max(since, datetime.utcnow() - timedelta(days=days))
         rows = (
-            db.query(EthBotState)
-            .filter(EthBotState.dry_run == dry_flag)
-            .order_by(desc(EthBotState.timestamp))
-            .limit(96)
+            db.query(EthBotState.timestamp, EthBotState.capital, EthBotState.current_price)
+            .filter(EthBotState.dry_run == (1 if dry_run else 0), EthBotState.timestamp >= since)
+            .order_by(EthBotState.timestamp)
             .all()
         )
-        rows = list(reversed(rows))
-        points = [{
-            "timestamp": _localtime(s.timestamp).strftime("%d/%m %H:%M") if s.timestamp else "",
-            "capital": s.capital, "price": s.current_price, "regime": s.regime,
-        } for s in rows]
-    return JSONResponse({"points": points})
+    stride = max(1, -(-len(rows) // 300))
+    sampled = rows[::stride]
+    if rows and sampled[-1] is not rows[-1]:
+        sampled.append(rows[-1])
+    points = [{
+        "timestamp": _localtime(ts).strftime("%H:%M" if days == 1 else "%d/%m"),
+        "label": _localtime(ts).strftime("%d/%m %H:%M"),
+        "capital": cap, "price": price,
+        "hold": round(base["usdt"] + base["eth"] * (price or 0), 4),
+    } for ts, cap, price in sampled if cap is not None]
+    return JSONResponse({"points": points, "start_value": base["value"]})
 
 
 # ── API: start / stop ─────────────────────────────────────────────────────────
