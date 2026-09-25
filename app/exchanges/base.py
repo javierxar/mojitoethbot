@@ -23,9 +23,15 @@ class ExchangeClient(ABC):
     balances → { "<currency>": {"available": float, "locked": float}, ... }
 
     order → {
-        "order_id": str, "pair": str, "side": str, "type": str,
-        "amount": float, "eth_amount": float, "price": float, "total": float,
+        "order_id": str, "pair": str, "side": str, "type": str, "amount": float,
         "status": str, "created_at": str,
+        "confirmed": bool,            # True si los datos del fill son reales
+        # Solo si confirmed:
+        "price": float,               # precio promedio real
+        "eth_amount": float,          # ETH ejecutados (bruto)
+        "eth_net": float,             # compra: ETH recibidos; venta: ETH entregados
+        "usdt_net": float,            # compra: USDT gastados; venta: USDT recibidos
+        "fee_amount": float, "fee_currency": str, "fee_usd": float,
     }
 
     candle (OHLCV) → {

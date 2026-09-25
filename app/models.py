@@ -64,10 +64,13 @@ class EthTrade(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     side = Column(String(4), nullable=False)             # buy | sell
-    price = Column(Float, nullable=False)                # precio ETH/USD de ejecución
-    amount_eth = Column(Float, nullable=False)           # ETH operados
-    amount_usd = Column(Float, nullable=False)           # USD operados
-    pnl = Column(Float, nullable=True, default=0.0)      # ganancia/pérdida realizada (USD)
+    price = Column(Float, nullable=False)                # precio promedio real de ejecución
+    amount_eth = Column(Float, nullable=False)           # ETH netos (compra: recibidos; venta: entregados)
+    amount_usd = Column(Float, nullable=False)           # USDT netos (compra: gastados; venta: recibidos)
+    pnl = Column(Float, nullable=True, default=0.0)      # resultado realizado NETO de comisiones (USD)
+    fee_amount = Column(Float, nullable=True)            # comisión cobrada, en fee_currency
+    fee_currency = Column(String(8), nullable=True)      # eth | usdt
+    fee_usd = Column(Float, nullable=True)               # comisión valuada en USD (NULL = trade previo sin dato)
     strategy = Column(String(16), nullable=False)        # grid | breakout
     status = Column(String(16), nullable=False, default="simulated")  # simulated | filled | error
     order_id = Column(String(128), nullable=True)        # id de la orden del exchange (live)

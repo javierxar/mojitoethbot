@@ -10,7 +10,8 @@ Las velas OHLCV NO vienen de Bitso: se descargan de la API pública de Binance
 
 TODOs pendientes de verificación contra documentación oficial de Bitso:
   - TODO [B2]: Confirmar campo de monto en POST /orders (major=ETH / minor=USDT)
-  - TODO [B3]: Confirmar estructura de GET /orders/{oid} response
+  - Fills: GET /orders/{oid} devuelve "OID incorrecto" para órdenes a mercado ya
+    ejecutadas; el fill real (precio, cantidades, comisión) sale de /order_trades/{oid}.
   - TODO [B6]: Confirmar book name "eth_usdt" en Bitso
 
 NUNCA activar DRY_RUN=false sin revisar todos los TODOs anteriores.
@@ -27,9 +28,12 @@ import httpx
 
 from app import config
 from app.exchanges.base import ExchangeClient
+from app.trading_math import floor_decimals
 
 logger = logging.getLogger(__name__)
 
+_FILL_POLL_ATTEMPTS = 5
+_FILL_POLL_DELAY = 2             # segundos entre consultas del fill
 _BASE_URL = "https://bitso.com/api/v3"
 _BINANCE_URL = "https://api.binance.com/api/v3/klines"
 _RETRY_DELAYS = [30, 90, 270]   # segundos entre reintentos (backoff exponencial)
@@ -184,82 +188,55 @@ class BitsoExchangeClient(ExchangeClient):
         return result
 
     def place_market_buy(self, pair: str, amount: float) -> dict:
-        """
-        POST /api/v3/orders/  (privado) — compra a mercado.
-
-        TODO [B2]: Confirmar que el campo para monto fiat es "minor".
-        Cuerpo: {"book": "eth_ars", "side": "buy", "type": "market", "minor": "5000.00"}
-        """
-        body = {
-            "book": pair, "side": "buy", "type": "market",
-            "minor": str(round(amount, 2)),
-        }
+        """POST /api/v3/orders/ — compra a mercado gastando `amount` de la moneda cotización (minor)."""
+        amount = floor_decimals(amount, 2)
+        body = {"book": pair, "side": "buy", "type": "market", "minor": f"{amount:.2f}"}
         logger.info("[BITSO] place_market_buy(%s, %.2f) — enviando orden...", pair, amount)
         payload = self._post("/orders/", body)
         return self._finalize_order(payload, pair, side="buy", requested_amount=amount)
 
     def place_market_sell(self, pair: str, amount_eth: float) -> dict:
-        """
-        POST /api/v3/orders/  (privado) — venta a mercado de ETH.
-
-        En una venta a mercado se especifica el monto en la moneda mayor (ETH)
-        vía el campo "major".
-        TODO [B2]: Confirmar que type="market" + side="sell" + major={eth} es correcto.
-        Cuerpo: {"book": "eth_ars", "side": "sell", "type": "market", "major": "0.05"}
-        """
-        body = {
-            "book": pair, "side": "sell", "type": "market",
-            "major": str(round(amount_eth, 8)),
-        }
+        """POST /api/v3/orders/ — venta a mercado de `amount_eth` ETH (major)."""
+        amount_eth = floor_decimals(amount_eth, 8)
+        body = {"book": pair, "side": "sell", "type": "market", "major": f"{amount_eth:.8f}"}
         logger.info("[BITSO] place_market_sell(%s, %.8f ETH) — enviando orden...", pair, amount_eth)
         payload = self._post("/orders/", body)
         return self._finalize_order(payload, pair, side="sell", requested_amount=amount_eth)
 
     def _finalize_order(self, payload: dict, pair: str, side: str, requested_amount: float) -> dict:
-        """Normaliza la respuesta de una orden y hace polling hasta estado final."""
-        order_id = payload.get("oid", payload.get("order_id", ""))
+        """Obtiene el fill REAL desde /order_trades/{oid}/ (GET /orders/{oid}/ no funciona en eth_usdt)."""
+        order_id = str(payload.get("oid") or payload.get("order_id") or "")
         result = {
-            "order_id": str(order_id), "pair": pair, "side": side, "type": "market",
-            "amount": requested_amount,
-            "eth_amount": float(payload.get("major", 0) or 0),
-            "price": float(payload.get("price", 0) or 0),
-            "total": float(payload.get("minor", 0) or 0),
-            "status": payload.get("status", "pending"),
-            "created_at": payload.get("created_at", datetime.now(timezone.utc).isoformat()),
+            "order_id": order_id, "pair": pair, "side": side, "type": "market",
+            "amount": requested_amount, "status": "pending", "confirmed": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        logger.info("[BITSO] orden %s enviada → order_id=%s status=%s", side, order_id, result["status"])
-
-        _FINAL_STATUSES = {"completed", "filled", "cancelled", "failed"}
-        if order_id and result["status"] not in _FINAL_STATUSES:
-            for poll_attempt in range(1, 11):   # hasta 10 × 3s = ~30s
-                time.sleep(3)
-                try:
-                    filled = self.get_order(str(order_id), pair)
-                    result["status"] = filled["status"]
-                    if filled["status"] in _FINAL_STATUSES:
-                        result["eth_amount"] = filled.get("eth_amount", result["eth_amount"])
-                        result["price"] = filled.get("price", result["price"])
-                        result["total"] = filled.get("total", result["total"])
-                        logger.info("[BITSO] Orden %s confirmada: status=%s", order_id, result["status"])
-                        break
-                except Exception as exc:
-                    logger.warning("[BITSO] Error en polling %d/10: %s", poll_attempt, exc)
-            else:
-                logger.warning("[BITSO] Polling agotado — orden %s en estado '%s'", order_id, result["status"])
+        logger.info("[BITSO] orden %s enviada → order_id=%s", side, order_id)
+        if not order_id:
+            return result
+        for attempt in range(1, _FILL_POLL_ATTEMPTS + 1):
+            time.sleep(_FILL_POLL_DELAY)
+            try:
+                fill = parse_order_trades(self._get(f"/order_trades/{order_id}/", private=True))
+            except Exception as exc:
+                logger.warning("[BITSO] order_trades %s intento %d falló: %s", order_id, attempt, exc)
+                continue
+            if fill:
+                result.update(fill, status="completed", confirmed=True)
+                logger.info("[BITSO] Fill real %s: %.8f ETH netos @ %.2f, fee %.8f %s ($%.4f)",
+                            order_id, fill["eth_net"], fill["price"], fill["fee_amount"],
+                            fill["fee_currency"], fill["fee_usd"])
+                return result
+        logger.warning("[BITSO] Sin fill confirmado para la orden %s", order_id)
         return result
 
     def get_order(self, order_id: str, pair: str) -> dict:
-        raw = self._get(f"/orders/{order_id}/", private=True)
-        payload = raw[0] if isinstance(raw, list) and raw else (raw if isinstance(raw, dict) else {})
-        total = float(payload.get("original_value", 0) or 0)
-        return {
-            "order_id": order_id, "pair": payload.get("book", pair),
-            "side": payload.get("side", "buy"), "type": payload.get("type", "market"),
-            "amount": total, "eth_amount": float(payload.get("major", 0) or 0),
-            "price": float(payload.get("price", 0) or 0), "total": total,
-            "status": payload.get("status", "unknown"),
-            "created_at": payload.get("created_at", ""),
-        }
+        fill = parse_order_trades(self._get(f"/order_trades/{order_id}/", private=True))
+        result = {"order_id": order_id, "pair": pair, "type": "market",
+                  "status": "completed" if fill else "unknown", "confirmed": bool(fill)}
+        if fill:
+            result.update(fill)
+        return result
 
     def get_ohlcv_15m(self, pair: str, limit: int = 200) -> list[dict]:
         """
@@ -271,6 +248,41 @@ class BitsoExchangeClient(ExchangeClient):
         velas siempre se piden sobre ETHUSDT (configurable vía BINANCE_SYMBOL).
         """
         return _fetch_binance_ohlcv(limit=limit)
+
+
+def parse_order_trades(trades) -> dict | None:
+    """
+    Agrega los fills de /order_trades/{oid}/ en un único resultado neto.
+
+    Bitso descuenta la comisión de lo que se RECIBE: en una compra la cobra en ETH
+    y en una venta en USDT. major/minor vienen con signo según el lado.
+    """
+    if not isinstance(trades, list) or not trades:
+        return None
+    major = sum(abs(float(t.get("major") or 0)) for t in trades)
+    minor = sum(abs(float(t.get("minor") or 0)) for t in trades)
+    if major <= 0 or minor <= 0:
+        return None
+    side = str(trades[0].get("side", "")).lower()
+    major_ccy = str(trades[0].get("major_currency", "eth")).lower()
+    fee_ccy = str(trades[0].get("fees_currency", "")).lower()
+    fee = sum(float(t.get("fees_amount") or 0) for t in trades)
+    price = minor / major
+    fee_in_major = fee_ccy == major_ccy
+
+    if side == "buy":
+        eth_net = major - fee if fee_in_major else major
+        usdt_net = minor if fee_in_major else minor + fee      # USDT gastados
+    else:
+        eth_net = major + fee if fee_in_major else major       # ETH entregados
+        usdt_net = minor if fee_in_major else minor - fee      # USDT recibidos
+
+    return {
+        "side": side, "price": price, "eth_amount": major, "total": minor,
+        "eth_net": eth_net, "usdt_net": usdt_net,
+        "fee_amount": fee, "fee_currency": fee_ccy,
+        "fee_usd": fee * price if fee_in_major else fee,
+    }
 
 
 def _fetch_binance_ohlcv(limit: int = 200) -> list[dict]:

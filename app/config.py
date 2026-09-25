@@ -93,8 +93,9 @@ MAX_INVENTORY_COST_PCT: float = _get_float("MAX_INVENTORY_COST_PCT", 0.80)
 # Grid dinámico basado en ATR: range = ATR/precio * multiplicador, acotado
 GRID_ATR_MULTIPLIER: float = _get_float("GRID_ATR_MULTIPLIER", 3.0)
 GRID_RANGE_MIN_PCT: float = _get_float("GRID_RANGE_MIN_PCT", 0.05)
-# Fee taker de Bitso por lado (0.3586% medido en eth_usdt)
-TAKER_FEE_PCT: float = _get_float("TAKER_FEE_PCT", 0.0036)
+# Comisiones de Bitso en eth_usdt (órdenes a mercado = taker; verificado 0.36% en compras y ventas)
+BUY_FEE_PCT: float = _get_float("BUY_FEE_PCT", 0.0036)
+SELL_FEE_PCT: float = _get_float("SELL_FEE_PCT", 0.0036)
 # Ganancia mínima sobre costo + fees al fijar niveles de venta del inventario
 GRID_MIN_MARGIN_PCT: float = _get_float("GRID_MIN_MARGIN_PCT", 0.002)
 GRID_RANGE_MAX_PCT: float = _get_float("GRID_RANGE_MAX_PCT", 0.12)

@@ -40,6 +40,9 @@ def _migrate_columns() -> None:
     """Agrega columnas nuevas a tablas existentes sin borrar datos (SQLite ALTER TABLE)."""
     migrations: list[str] = [
         "ALTER TABLE eth_bot_state ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE eth_trades ADD COLUMN fee_amount FLOAT",
+        "ALTER TABLE eth_trades ADD COLUMN fee_currency VARCHAR(8)",
+        "ALTER TABLE eth_trades ADD COLUMN fee_usd FLOAT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

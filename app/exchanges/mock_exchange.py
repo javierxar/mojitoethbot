@@ -88,21 +88,28 @@ class MockExchangeClient(ExchangeClient):
 
     def place_market_buy(self, pair: str, amount: float) -> dict:
         exec_price = self._price_usd * (1 + self._spread_pct / 200)
-        eth_bought = amount / exec_price if exec_price else 0.0
-        return self._make_order(pair, "buy", amount, eth_bought, exec_price)
+        eth_gross = amount / exec_price if exec_price else 0.0
+        fee_eth = eth_gross * config.BUY_FEE_PCT
+        return self._make_order(pair, "buy", eth_gross, exec_price, eth_net=eth_gross - fee_eth,
+                                usdt_net=amount, fee_amount=fee_eth, fee_currency="eth",
+                                fee_usd=fee_eth * exec_price)
 
     def place_market_sell(self, pair: str, amount_eth: float) -> dict:
         exec_price = self._price_usd * (1 - self._spread_pct / 200)
-        total_usd = amount_eth * exec_price
-        return self._make_order(pair, "sell", total_usd, amount_eth, exec_price)
+        gross_usd = amount_eth * exec_price
+        fee_usd = gross_usd * config.SELL_FEE_PCT
+        return self._make_order(pair, "sell", amount_eth, exec_price, eth_net=amount_eth,
+                                usdt_net=gross_usd - fee_usd, fee_amount=fee_usd,
+                                fee_currency="usdt", fee_usd=fee_usd)
 
-    def _make_order(self, pair: str, side: str, amount_usd: float, eth: float, price: float) -> dict:
+    def _make_order(self, pair: str, side: str, eth: float, price: float, **fill) -> dict:
         order_id = str(uuid.uuid4())
         order = {
             "order_id": order_id, "pair": pair, "side": side, "type": "market",
-            "amount": round(amount_usd, 2), "eth_amount": round(eth, 8),
-            "price": round(price, 2), "total": round(amount_usd, 2),
-            "status": "filled", "created_at": datetime.now(timezone.utc).isoformat(),
+            "amount": round(fill["usdt_net"], 2), "eth_amount": round(eth, 8),
+            "price": round(price, 2), "total": round(eth * price, 2),
+            "status": "completed", "confirmed": True,
+            "created_at": datetime.now(timezone.utc).isoformat(), **fill,
         }
         self._orders[order_id] = order
         logger.info("[MOCK] place_market_%s(%s) → %.8f ETH @ %.2f", side, pair, eth, price)
@@ -112,11 +119,8 @@ class MockExchangeClient(ExchangeClient):
         order = self._orders.get(order_id)
         if order:
             return dict(order)
-        return {
-            "order_id": order_id, "pair": pair, "side": "buy", "type": "market",
-            "amount": 0.0, "eth_amount": 0.0, "price": 0.0, "total": 0.0,
-            "status": "error", "created_at": "",
-        }
+        return {"order_id": order_id, "pair": pair, "type": "market",
+                "status": "unknown", "confirmed": False, "created_at": ""}
 
     def get_ohlcv_15m(self, pair: str, limit: int = 200) -> list[dict]:
         """Velas reales de Binance también en modo mock (son públicas y gratuitas)."""

@@ -65,35 +65,37 @@ def _base_ctx(request: Request, db) -> dict:
     }
 
 
-def _fee_rate(dry_run: bool) -> float:
-    # El simulador no modela comisiones; en LIVE se estiman con el fee taker de Bitso
-    return 0.0 if dry_run else config.TAKER_FEE_PCT
+def _trade_net(t) -> tuple[float, float, bool]:
+    """
+    (comisión USD, resultado neto realizado, es_estimado) de un trade.
 
-
-def _trade_net(t, fee_rate: float) -> tuple[float, float]:
-    """(comisión, resultado neto) de un trade. Las compras solo aportan su comisión."""
-    fee = (t.amount_usd or 0.0) * fee_rate
-    gross = (t.pnl or 0.0) if t.side == "sell" else 0.0
-    return fee, gross - fee
+    Trades con fill registrado (fee_usd): el pnl de la venta ya es neto de ambas comisiones
+    (la de compra está en el costo), así que la compra no aporta resultado propio.
+    Trades previos sin fee_usd: comisión estimada; la compra la resta al momento de comprar
+    porque su costo registrado no la incluye.
+    """
+    if t.fee_usd is not None:
+        net = (t.pnl or 0.0) if t.side == "sell" else 0.0
+        return t.fee_usd, net, t.status != "completed"
+    rate = config.BUY_FEE_PCT if t.side == "buy" else config.SELL_FEE_PCT
+    fee = (t.amount_usd or 0.0) * rate
+    net = ((t.pnl or 0.0) - fee) if t.side == "sell" else -fee
+    return fee, net, True
 
 
 def _baseline(db, dry_run: bool) -> dict | None:
     """Punto de partida para medir resultados: {since(datetime UTC), usdt, eth, value}."""
-    if dry_run:
-        first = db.query(EthBotState).filter(EthBotState.dry_run == 1) \
-            .order_by(EthBotState.timestamp).first()
-        cap = float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD)))
-        return {"since": first.timestamp if first else datetime.utcnow(),
-                "usdt": cap, "eth": 0.0, "value": cap}
-    raw = get_setting(db, "live_baseline")
+    raw = get_setting(db, "sim_baseline" if dry_run else "live_baseline")
     if not raw:
         return None
     try:
         b = json.loads(raw)
         b["since"] = datetime.fromisoformat(b["since"])
-        return b
     except (ValueError, KeyError, TypeError):
         return None
+    if dry_run:
+        b.update(eth=0.0, value=b["usdt"])
+    return b
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -165,24 +167,19 @@ async def api_status(request: Request):
 @router.get("/api/eth/trades")
 async def api_trades(request: Request):
     with db_session() as db:
+        from app.eth_runner import _mode_trades
         dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
-        rows = (
-            db.query(EthTrade)
-            .filter(EthTrade.dry_run == (1 if dry_run else 0))
-            .order_by(desc(EthTrade.timestamp))
-            .limit(50)
-            .all()
-        )
-        fee_rate = _fee_rate(dry_run)
+        rows = _mode_trades(db, dry_run).order_by(desc(EthTrade.timestamp)).limit(50).all()
         trades = []
         for t in rows:
-            fee, net = _trade_net(t, fee_rate)
+            fee, net, estimated = _trade_net(t)
             trades.append({
                 "timestamp": _localtime(t.timestamp).strftime("%d/%m %H:%M") if t.timestamp else "",
                 "ts_iso": t.timestamp.replace(tzinfo=timezone.utc).isoformat() if t.timestamp else None,
                 "side": t.side, "price": t.price,
                 "amount_eth": t.amount_eth, "amount_usd": t.amount_usd,
-                "pnl": t.pnl, "fee": round(fee, 4), "net": round(net, 4),
+                "pnl": t.pnl, "fee": round(fee, 6), "net": round(net, 6),
+                "fee_estimated": estimated, "fee_amount": t.fee_amount, "fee_currency": t.fee_currency,
                 "strategy": t.strategy, "status": t.status,
             })
     return JSONResponse({"trades": trades, "count": len(trades)})
@@ -206,7 +203,6 @@ async def api_performance(request: Request):
                   .filter(EthTrade.dry_run == flag, EthTrade.timestamp >= since)
                   .order_by(EthTrade.timestamp).all())
 
-    fee_rate = _fee_rate(dry_run)
     days: dict = {}
 
     def _day(ts):
@@ -224,7 +220,7 @@ async def api_performance(request: Request):
     wins = 0
     for t in trades:
         day = _day(t.timestamp)
-        fee, net = _trade_net(t, fee_rate)
+        fee, net, _ = _trade_net(t)
         day["fees"] += fee
         day["bot_net"] += net
         if t.side == "buy":
@@ -276,13 +272,17 @@ async def api_performance(request: Request):
 
 @router.post("/api/eth/baseline/reset")
 async def api_baseline_reset(request: Request):
-    """Reinicia el punto de partida LIVE (usar después de depositar o retirar fondos)."""
+    """Reinicia el punto de partida: en LIVE tras depósitos/retiros; en SIMULADOR reinicia la billetera simulada."""
     try:
-        from app.eth_runner import _get_exchange_balances, set_live_baseline
+        from app.eth_runner import _get_exchange_balances, _sim_start_usdt, set_live_baseline, set_sim_baseline
         from app.exchanges.factory import get_exchange_client
-        client = get_exchange_client()
         with db_session() as db:
             pair = get_setting(db, "trading_pair", config.TRADING_PAIR)
+            if _bool_setting(db, "dry_run", config.DRY_RUN):
+                baseline = set_sim_baseline(db, _sim_start_usdt(db))
+                logger.info("[WEB] Simulación reiniciada con $%.2f", baseline["usdt"])
+                return JSONResponse({"ok": True, "baseline": baseline})
+        client = get_exchange_client()
         usdt, eth = _get_exchange_balances(client)
         price = float(client.get_ticker(pair).get("last", 0))
         with db_session() as db:

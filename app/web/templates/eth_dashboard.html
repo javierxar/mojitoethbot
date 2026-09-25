@@ -176,8 +176,9 @@
       <ul style="margin-top:0.4rem; padding-left:1.4rem;">
         <li><strong style="color:var(--text);">Hoy / Desde el inicio</strong> — Cuánto cambió el valor total de tu portfolio (USDT + ETH).
           Incluye la suba o baja del precio de ETH que tenés en cartera, no solo lo que hizo el bot.</li>
-        <li><strong style="color:var(--text);">Ganancia del bot (neta)</strong> — Lo que ganó el bot con ventas ya cerradas, restando las comisiones.
-          Justo después de una compra puede verse levemente negativa: la comisión se descuenta al comprar y la ganancia aparece al vender.</li>
+        <li><strong style="color:var(--text);">Ganancia del bot (neta)</strong> — Lo que ganó el bot con ventas ya cerradas:
+          USDT recibidos (ya descontada la comisión de venta) menos lo que costó ese ETH (incluida la comisión de compra).
+          Las comisiones son las reales que cobró Bitso; si aparece "≈", Bitso no confirmó el dato y se estimó con 0,36%.</li>
         <li><strong style="color:var(--text);">Vs. no operar</strong> — Diferencia entre tu portfolio actual y lo que tendrías si
           hubieras dejado todo como estaba al inicio. Positivo = el bot te dejó más plata que no hacer nada.</li>
         <li><strong style="color:var(--text);">Reiniciar punto de partida</strong> — Si depositás o retirás plata en Bitso, tocá este botón
@@ -198,7 +199,8 @@
       <ul style="margin-top:0.4rem; padding-left:1.4rem;">
         <li><strong style="color:var(--green);">START / STOP</strong> — Enciende o apaga el bot.</li>
         <li><strong style="color:var(--text);">Tick</strong> — Hace un chequeo ahora sin esperar los 15 minutos.</li>
-        <li><strong style="color:var(--blue);">SIMULADOR</strong> / <strong style="color:var(--red);">LIVE</strong> — Simulación sin plata real, u operaciones reales en Bitso.</li>
+        <li><strong style="color:var(--blue);">SIMULADOR</strong> / <strong style="color:var(--red);">LIVE</strong> — Simulación sin plata real
+          (misma lógica y mismas comisiones que en real), u operaciones reales en Bitso.</li>
       </ul>
     </div>
 
@@ -257,7 +259,7 @@ function renderStatus() {
   const mb = document.getElementById('modeBadge');
   mb.textContent = currentDryRun ? 'SIMULADOR' : 'LIVE · dinero real';
   mb.className = 'badge ' + (currentDryRun ? 'badge-blue' : 'badge-red');
-  document.getElementById('btnBaseline').style.display = currentDryRun ? 'none' : '';
+  document.getElementById('btnBaseline').textContent = currentDryRun ? 'Reiniciar simulación' : 'Reiniciar punto de partida';
   syncModeUI();
 }
 
@@ -357,9 +359,8 @@ function renderPerf() {
   document.getElementById('totalSub').textContent = `${signedPct(p.total_change_pct)} · de ${usd(p.start_value)} a ${usd(p.current_value)}`;
 
   setVal('botVal', signedUsd(p.bot_net), p.bot_net);
-  document.getElementById('botSub').textContent = p.dry_run
-    ? `${p.sells} ventas cerradas (simulación sin comisiones)`
-    : `${p.sells} ventas cerradas · comisiones pagadas ${usd(p.fees)}`;
+  document.getElementById('botSub').textContent =
+    `${p.sells} ventas cerradas · comisiones pagadas ${usd(p.fees)}${p.dry_run ? ' (simuladas)' : ''}`;
 
   setVal('holdVal', signedUsd(p.vs_hold), p.vs_hold);
   document.getElementById('holdSub').textContent = `Sin operar tendrías ${usd(p.hold_value)}`;
@@ -408,11 +409,14 @@ function renderTrades() {
   if (!d.trades.length) { tb.innerHTML = '<tr><td colspan="7" class="muted">Sin operaciones todavía.</td></tr>'; return; }
   tb.innerHTML = d.trades.map(t => {
     const side = t.side === 'buy' ? '<span class="badge badge-green">COMPRA</span>' : '<span class="badge badge-red">VENTA</span>';
-    const res = t.side === 'sell' ? `<span class="${cls(t.net)}">${signedUsd(t.net)}</span>` : '<span class="muted">—</span>';
+    const est = t.fee_estimated ? '≈ ' : '';
+    const res = t.side === 'sell' ? `<span class="${cls(t.net)}">${est}${signedUsd(t.net)}</span>` : '<span class="muted">—</span>';
+    const feeTitle = t.fee_estimated ? 'Estimada con la comisión configurada' : `Real: ${t.fee_amount} ${String(t.fee_currency || '').toUpperCase()}`;
     return `<tr><td>${t.timestamp}</td>
       <td>${side}<span class="sub-strat">${STRAT[t.strategy] || t.strategy}</span></td>
       <td class="num">${usd(t.price)}</td><td class="num">${nf(t.amount_eth, 5)}</td>
-      <td class="num">${usd(t.amount_usd)}</td><td class="num">${t.fee ? usd(t.fee, 3) : '—'}</td>
+      <td class="num">${usd(t.amount_usd)}</td>
+      <td class="num" title="${feeTitle}">${t.fee ? est + usd(t.fee, 3) : '—'}</td>
       <td class="num">${res}</td></tr>`;
   }).join('');
 }
@@ -501,8 +505,10 @@ async function runTick() {
   if (d.ok) { toast('Chequeo listo: ' + d.action); refreshAll(); } else { toast('Error en el chequeo', false); }
 }
 async function resetBaseline() {
-  const ok = confirm('Reiniciar el punto de partida?\n\nUsalo después de depositar o retirar fondos en Bitso. ' +
-                     'Los resultados "Hoy", "Desde el inicio" y el gráfico se empiezan a medir desde el saldo actual.');
+  const ok = confirm(currentDryRun
+    ? '¿Reiniciar la simulación?\n\nLa billetera simulada vuelve al capital inicial y las operaciones simuladas anteriores dejan de contar.'
+    : '¿Reiniciar el punto de partida?\n\nUsalo después de depositar o retirar fondos en Bitso. ' +
+      'Los resultados "Hoy", "Desde el inicio" y el gráfico se empiezan a medir desde el saldo actual.');
   if (!ok) return;
   await apiPost('/api/eth/baseline/reset', null, 'Punto de partida reiniciado');
   refreshAll();
