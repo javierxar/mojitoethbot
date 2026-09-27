@@ -47,18 +47,22 @@ La matemática (ADX, Donchian) es pura y está cubierta por tests
 
 ## API
 
-| Método | Ruta                    | Descripción                              |
-|--------|-------------------------|------------------------------------------|
-| GET    | `/api/eth/status`       | régimen, adx, precio, capital, P&L       |
-| GET    | `/api/eth/trades`       | últimos 50 trades con P&L y win rate     |
-| GET    | `/api/eth/grid`         | niveles activos del grid                 |
-| GET    | `/api/eth/candles`      | últimas 100 velas 15m cacheadas          |
-| GET    | `/api/eth/history`      | evolución del capital (para el gráfico)  |
-| POST   | `/api/eth/bot/start`    | inicia el bot                            |
-| POST   | `/api/eth/bot/stop`     | detiene el bot                           |
-| POST   | `/api/eth/config`       | guarda capital / levels / range_pct      |
-| POST   | `/api/eth/mode`         | cambia SIMULADOR ↔ LIVE                   |
-| POST   | `/api/eth/tick`         | corre un ciclo manual                    |
+| Método | Ruta                        | Descripción                                   |
+|--------|-----------------------------|-----------------------------------------------|
+| GET    | `/api/eth/status`           | régimen, adx, precio, estado, próximo chequeo |
+| GET    | `/api/eth/performance`      | resultados de hoy, históricos y día a día     |
+| GET    | `/api/eth/trades`           | últimos 50 trades con comisión y neto         |
+| GET    | `/api/eth/grid`             | niveles activos del grid                      |
+| GET    | `/api/eth/history`          | valor del portfolio vs. no operar (gráfico)   |
+| GET    | `/api/eth/balances`         | saldos del exchange                           |
+| POST   | `/api/eth/bot/start`        | inicia el bot                                 |
+| POST   | `/api/eth/bot/stop`         | detiene el bot                                |
+| POST   | `/api/eth/mode`             | cambia SIMULADOR ↔ LIVE                        |
+| POST   | `/api/eth/baseline/reset`   | reinicia el punto de partida de resultados    |
+| POST   | `/api/eth/tick`             | corre un ciclo manual                         |
+
+Páginas del panel: `/dashboard` (Resumen), `/rendimiento`, `/operaciones`, `/modo`,
+`/exchange`, `/password`, `/ayuda`.
 
 ## Puesta en marcha
 

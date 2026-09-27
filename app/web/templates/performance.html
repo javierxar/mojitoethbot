@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Rendimiento{% endblock %}
+{% block page_title %}Rendimiento{% endblock %}
+{% block page_sub %}Cuánto vas ganando, día por día{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom:1rem;">
+  <div class="card-head" style="margin-bottom:0;">
+    <div>
+      <div class="card-title">{{ icon('target') }} Punto de partida</div>
+      <div class="card-sub" id="sinceLabel" style="margin-top:0.2rem;"><span class="skel"></span></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btnBaseline" onclick="resetBaseline()" hidden
+            title="Usalo después de depositar o retirar fondos">{{ icon('reset', 'ic-sm') }} <span>Reiniciar punto de partida</span></button>
+  </div>
+</div>
+
+<div class="grid cols-3">
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Hoy</span><span class="kpi-icon blue">{{ icon('calendar') }}</span></div>
+    <div class="kpi-value" id="todayVal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span class="delta" id="todayPct">—</span><span id="todaySub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Desde el inicio</span><span class="kpi-icon green">{{ icon('trending') }}</span></div>
+    <div class="kpi-value" id="totalVal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span class="delta" id="totalPct">—</span><span id="totalSub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Ganancia del bot (neta)</span><span class="kpi-icon yellow">{{ icon('bot') }}</span></div>
+    <div class="kpi-value" id="botVal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span id="botSub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Vs. no operar</span><span class="kpi-icon">{{ icon('scale') }}</span></div>
+    <div class="kpi-value" id="holdVal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span id="holdSub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Ventas con ganancia</span><span class="kpi-icon green">{{ icon('target') }}</span></div>
+    <div class="kpi-value" id="winVal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span id="winSub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Comisiones pagadas</span><span class="kpi-icon yellow">{{ icon('receipt') }}</span></div>
+    <div class="kpi-value" id="feesVal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span id="feesSub"></span></div>
+  </div>
+</div>
+
+<div class="card mt">
+  <div class="card-head">
+    <div class="card-title">{{ icon('activity') }} Variación diaria del portfolio</div>
+    <span class="card-sub">Últimos 30 días</span>
+  </div>
+  <div class="chart-box sm" id="dayChartBox"><canvas id="dayChart"></canvas></div>
+  <div class="empty-state" id="dayChartEmpty" hidden>{{ icon('calendar') }}Todavía no hay días completos para mostrar.</div>
+</div>
+
+<div class="card mt">
+  <div class="card-head"><div class="card-title">{{ icon('calendar') }} Día a día</div></div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr>
+        <th>Día</th><th class="num">Valor al cierre</th><th class="num">Variación</th>
+        <th class="num">Ganancia bot</th><th class="num">Compras / ventas</th><th class="num">Comisiones</th><th class="num">Precio ETH</th>
+      </tr></thead>
+      <tbody id="daysBody"><tr><td colspan="7" class="empty"><span class="skel" style="width:60%"></span></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let perf = null;
+let dayChart = null;
+
+function render() {
+  const p = perf; if (!p) return;
+  const btn = $('btnBaseline');
+  btn.hidden = false;
+  btn.querySelector('span').textContent = p.dry_run ? 'Reiniciar simulación' : 'Reiniciar punto de partida';
+
+  if (!p.ready) {
+    setText('sinceLabel', 'El punto de partida se fija en el próximo chequeo del bot.');
+    ['todayVal', 'totalVal', 'botVal', 'holdVal', 'winVal', 'feesVal'].forEach(id => setVal(id, '—'));
+    $('daysBody').innerHTML = '<tr><td colspan="7" class="empty">Sin datos todavía.</td></tr>';
+    renderDayChart([]);
+    return;
+  }
+  setText('sinceLabel', `Midiendo desde ${p.since} con ${usd(p.start_value)}${p.dry_run ? ' (simulación)' : ''}`);
+
+  const t = p.today, nOps = t.buys + t.sells;
+  setVal('todayVal', signedUsd(t.change), t.change);
+  setDelta('todayPct', signedPct(t.change_pct), t.change_pct);
+  setText('todaySub', `${nOps} ${nOps === 1 ? 'operación' : 'operaciones'} · bot ${signedUsd(t.bot_net)}`);
+
+  setVal('totalVal', signedUsd(p.total_change), p.total_change);
+  setDelta('totalPct', signedPct(p.total_change_pct), p.total_change_pct);
+  setText('totalSub', `de ${usd(p.start_value)} a ${usd(p.current_value)}`);
+
+  setVal('botVal', signedUsd(p.bot_net), p.bot_net);
+  setText('botSub', `${p.sells} ${p.sells === 1 ? 'venta cerrada' : 'ventas cerradas'} de ${p.trades} operaciones`);
+
+  setVal('holdVal', signedUsd(p.vs_hold), p.vs_hold);
+  setText('holdSub', `Sin operar tendrías ${usd(p.hold_value)}`);
+
+  setVal('winVal', p.win_rate === null ? '—' : nf(p.win_rate, 0) + '%');
+  setText('winSub', p.sells ? `de ${p.sells} ventas, después de comisiones` : 'Todavía no cerró ventas');
+
+  setVal('feesVal', usd(p.fees, p.fees < 1 ? 3 : 2));
+  setText('feesSub', p.dry_run ? 'Simuladas con las comisiones de Bitso' : 'Cobradas por Bitso (compras y ventas)');
+
+  renderDays(p.days);
+  renderDayChart(p.days.slice(0, 30).reverse());
+}
+
+function renderDays(rows) {
+  const tb = $('daysBody');
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">Sin datos todavía.</td></tr>'; return; }
+  tb.innerHTML = rows.map(r => `<tr>
+      <td class="nowrap" style="text-transform:capitalize;">${dayLabel(r.date)}</td>
+      <td class="num">${usd(r.close_value)}</td>
+      <td class="num ${cls(r.change)}">${signedUsd(r.change)} <span class="faint">(${signedPct(r.change_pct)})</span></td>
+      <td class="num ${cls(r.bot_net)}">${r.buys + r.sells ? signedUsd(r.bot_net) : '—'}</td>
+      <td class="num">${r.buys} / ${r.sells}</td>
+      <td class="num muted">${r.fees ? usd(r.fees, 3) : '—'}</td>
+      <td class="num">${r.eth_price ? usd(r.eth_price) : '—'}</td>
+    </tr>`).join('');
+}
+
+function renderDayChart(rows) {
+  $('dayChartEmpty').hidden = rows.length > 0;
+  $('dayChartBox').hidden = rows.length === 0;
+  if (!rows.length) return;
+  const labels = rows.map(r => dayLabel(r.date));
+  const data = rows.map(r => r.change);
+  const colors = data.map(v => v >= 0 ? 'rgba(52,211,153,0.75)' : 'rgba(248,113,113,0.75)');
+  if (dayChart) {
+    dayChart.data.labels = labels;
+    dayChart.data.datasets[0].data = data;
+    dayChart.data.datasets[0].backgroundColor = colors;
+    dayChart.update('none');
+    return;
+  }
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  dayChart = new Chart($('dayChart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 6, maxBarThickness: 38 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c2331', borderColor: 'rgba(148,163,184,0.18)', borderWidth: 1, padding: 12,
+          titleColor: '#e8ecf4', bodyColor: '#c3cad8', cornerRadius: 10, displayColors: false,
+          callbacks: { label: c => 'Variación: ' + signedUsd(c.parsed.y) },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#5b657a', maxRotation: 0, autoSkipPadding: 12 }, grid: { display: false }, border: { display: false } },
+        y: { ticks: { color: '#5b657a', callback: v => signedUsd(v), maxTicksLimit: 6 },
+             grid: { color: 'rgba(148,163,184,0.07)' }, border: { display: false } },
+      },
+    },
+  });
+}
+
+async function resetBaseline() {
+  const sim = perf && perf.dry_run;
+  const ok = await confirmDialog(sim
+    ? { title: '¿Reiniciar la simulación?',
+        text: 'La billetera simulada vuelve al capital inicial y las operaciones simuladas anteriores dejan de contar.',
+        confirm: 'Reiniciar', danger: true }
+    : { title: '¿Reiniciar el punto de partida?',
+        text: 'Usalo después de depositar o retirar fondos en Bitso.\nLos resultados "Hoy", "Desde el inicio" y el gráfico se empiezan a medir desde el saldo actual.',
+        confirm: 'Reiniciar', danger: true });
+  if (!ok) return;
+  await apiPost('/api/eth/baseline/reset', null, 'Punto de partida reiniciado');
+  refresh();
+}
+
+async function refresh() {
+  const [, p] = await Promise.all([Shell.load(), getJson('/api/eth/performance').catch(() => null)]);
+  if (p) { perf = p; render(); }
+}
+every(refresh);
+</script>
+{% endblock %}

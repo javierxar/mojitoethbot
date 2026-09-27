@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Ayuda{% endblock %}
+{% block page_title %}Ayuda{% endblock %}
+{% block page_sub %}Cómo funciona el bot y cómo leer cada pantalla{% endblock %}
+
+{% block content %}
+
+<div class="card faq" style="max-width:900px;">
+
+  <details open>
+    <summary><span class="faq-ic">{{ icon('bot') }}</span> ¿Qué es este bot? {{ icon('chevron') }}</summary>
+    <div class="faq-body">
+      Un programa que compra y vende Ethereum (ETH) por vos en Bitso usando USDT (dólares digitales).
+      Busca ganar un poco en cada subida y bajada normal del precio.
+    </div>
+  </details>
+
+  <details open>
+    <summary><span class="faq-ic">{{ icon('layers') }}</span> ¿Cómo funciona? {{ icon('chevron') }}</summary>
+    <div class="faq-body">
+      Usa <b>grid trading</b>: arma una "grilla" de precios alrededor del precio actual.
+      Si ETH baja hasta un nivel de compra, compra un poco. Cada compra queda con su propio objetivo de venta un escalón
+      más arriba (~1,25%), suficiente para cubrir las comisiones de Bitso (~0,72% ida y vuelta) y dejar ganancia.
+      La grilla se mantiene fija; solo se rearma si el precio se aleja mucho, y nunca pone a la venta ETH por debajo de lo que costó.
+      Revisa el precio cada 15 minutos.
+      <ul>
+        <li>En <b>Resumen → Grilla de precios</b> ves los niveles: en rojo las ventas, en verde las compras y en azul el precio actual.</li>
+        <li>La franja sombreada es la <b>zona de espera</b>: mientras el precio se mueva ahí adentro, el bot no opera.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="faq-ic">{{ icon('trending') }}</span> ¿Cómo leer los resultados? {{ icon('chevron') }}</summary>
+    <div class="faq-body">
+      <ul>
+        <li><b>Hoy / Desde el inicio</b> — Cuánto cambió el valor total de tu portfolio (USDT + ETH).
+          Incluye la suba o baja del precio de ETH que tenés en cartera, no solo lo que hizo el bot.</li>
+        <li><b>Ganancia del bot (neta)</b> — Lo que ganó el bot con ventas ya cerradas:
+          USDT recibidos (ya descontada la comisión de venta) menos lo que costó ese ETH (incluida la comisión de compra).
+          Las comisiones son las reales que cobró Bitso; si aparece "≈", Bitso no confirmó el dato y se estimó con 0,36%.</li>
+        <li><b>Vs. no operar</b> (en Rendimiento) — Diferencia entre tu portfolio actual y lo que tendrías si
+          hubieras dejado todo como estaba al inicio. Positivo = el bot te dejó más plata que no hacer nada.</li>
+        <li><b>Reiniciar punto de partida</b> (en Rendimiento) — Si depositás o retirás plata en Bitso, usalo
+          para que el depósito no cuente como ganancia (o el retiro como pérdida).</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="faq-ic">{{ icon('activity') }}</span> Mercado lateral y tendencia {{ icon('chevron') }}</summary>
+    <div class="faq-body">
+      <ul>
+        <li><b>Lateral</b> — El precio va y viene (ADX &lt; {{ adx_threshold | int }}). Es el escenario ideal para la grilla.</li>
+        <li><b>Tendencia</b> — Hay una tendencia fuerte (ADX ≥ {{ adx_threshold | int }}). El bot puede operar rupturas de precio.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="faq-ic">{{ icon('toggle') }}</span> Controles {{ icon('chevron') }}</summary>
+    <div class="faq-body">
+      <ul>
+        <li><b>Encender / Detener</b> (en Resumen) — Prende o apaga el bot. Apagado no compra ni vende.</li>
+        <li><b>Chequear ahora</b> — Hace un chequeo en el momento, sin esperar los 15 minutos.</li>
+        <li><b>Modo de operación</b> — <b>Simulador</b>: practica sin plata real (misma lógica y mismas comisiones).
+          <b>Live</b>: opera de verdad en Bitso. Siempre pide confirmación antes de cambiar.</li>
+        <li><b>Exchange API</b> — Las credenciales de Bitso que usa el bot en modo live.</li>
+      </ul>
+    </div>
+  </details>
+
+</div>
+
+{% endblock %}

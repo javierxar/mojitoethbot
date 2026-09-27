@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Operaciones{% endblock %}
+{% block page_title %}Operaciones{% endblock %}
+{% block page_sub %}Las últimas 50 compras y ventas del bot{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <div class="card-head">
+    <div class="card-title">{{ icon('swap') }} Historial</div>
+    <div class="seg" id="filterBtns">
+      <button data-side="" class="active">Todas <span class="count" id="cntAll"></span></button>
+      <button data-side="buy">Compras <span class="count" id="cntBuy"></span></button>
+      <button data-side="sell">Ventas <span class="count" id="cntSell"></span></button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr>
+        <th>Operación</th><th>Fecha</th><th class="num">Precio</th><th class="num">ETH</th>
+        <th class="num">Monto</th><th class="num">Comisión</th><th class="num">Resultado neto</th>
+      </tr></thead>
+      <tbody id="tradesBody"><tr><td colspan="7" class="empty"><span class="skel" style="width:60%"></span></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<p class="faint sm" style="margin-top:0.9rem;">
+  {{ icon('info', 'ic-sm') }} El resultado neto de cada venta ya descuenta las comisiones de compra y venta.
+  "≈" indica que Bitso no informó la comisión y se estimó con 0,36%.
+</p>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const STRAT = { grid: 'grid', breakout: 'ruptura', profit_take: 'toma de ganancia' };
+let trades = null;
+let side = '';
+
+function render() {
+  if (!trades) return;
+  const all = trades.trades;
+  setText('cntAll', all.length);
+  setText('cntBuy', all.filter(t => t.side === 'buy').length);
+  setText('cntSell', all.filter(t => t.side === 'sell').length);
+  const rows = side ? all.filter(t => t.side === side) : all;
+  const tb = $('tradesBody');
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">Sin operaciones todavía.</td></tr>'; return; }
+  tb.innerHTML = rows.map(t => {
+    const buy = t.side === 'buy';
+    const est = t.fee_estimated ? '≈ ' : '';
+    const res = buy ? '<span class="faint">—</span>' : `<b class="${cls(t.net)}">${est}${signedUsd(t.net)}</b>`;
+    const feeTitle = t.fee_estimated ? 'Estimada con la comisión configurada' : `Real: ${t.fee_amount} ${String(t.fee_currency || '').toUpperCase()}`;
+    return `<tr>
+      <td><div class="side-cell"><span class="side-ic ${t.side}">${icon(buy ? 'down' : 'up')}</span>
+        <div><b>${buy ? 'Compra' : 'Venta'}</b><small>${STRAT[t.strategy] || t.strategy}</small></div></div></td>
+      <td class="nowrap">${t.timestamp}<small class="faint" style="display:block;font-size:0.72rem;">${ago(t.ts_iso)}</small></td>
+      <td class="num">${usd(t.price)}</td>
+      <td class="num">${nf(t.amount_eth, 5)}</td>
+      <td class="num">${usd(t.amount_usd)}</td>
+      <td class="num muted" title="${feeTitle}">${t.fee ? est + usd(t.fee, 3) : '—'}</td>
+      <td class="num">${res}</td></tr>`;
+  }).join('');
+}
+
+$('filterBtns').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  side = b.dataset.side;
+  document.querySelectorAll('#filterBtns button').forEach(x => x.classList.toggle('active', x === b));
+  render();
+});
+
+async function refresh() {
+  const [, d] = await Promise.all([Shell.load(), getJson('/api/eth/trades').catch(() => null)]);
+  if (d) { trades = d; render(); }
+}
+every(refresh);
+</script>
+{% endblock %}

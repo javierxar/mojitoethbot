@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Modo de operación{% endblock %}
+{% block page_title %}Modo de operación{% endblock %}
+{% block page_sub %}Elegí si el bot opera con dinero real o simulado{% endblock %}
+
+{% block content %}
+
+<div class="mode-grid">
+  <button type="button" class="mode-card sim {{ 'active' if dry_run }}" {% if not dry_run %}onclick="setMode(false)"{% endif %}>
+    <span class="mode-state">
+      {% if dry_run %}<span class="badge badge-blue">{{ icon('check', 'ic-sm') }} Activo</span>{% endif %}
+    </span>
+    <span class="mode-icon">{{ icon('flask', 'ic-lg') }}</span>
+    <h3>Simulador</h3>
+    <p>El bot practica sin tocar tu dinero. Ideal para probar cambios o ver cómo se comporta.</p>
+    <ul>
+      <li>{{ icon('check') }} Misma lógica y mismas comisiones que en real</li>
+      <li>{{ icon('check') }} Usa una billetera simulada, separada de Bitso</li>
+      <li>{{ icon('check') }} Nunca envía órdenes al exchange</li>
+    </ul>
+    {% if not dry_run %}<span class="mode-cta">Cambiar a simulador {{ icon('chevron', 'ic-sm') }}</span>{% endif %}
+  </button>
+
+  <button type="button" class="mode-card live {{ 'active' if not dry_run }}" {% if dry_run %}onclick="setMode(true)"{% endif %}>
+    <span class="mode-state">
+      {% if not dry_run %}<span class="badge badge-red">{{ icon('check', 'ic-sm') }} Activo</span>{% endif %}
+    </span>
+    <span class="mode-icon">{{ icon('zap', 'ic-lg') }}</span>
+    <h3>Live · dinero real</h3>
+    <p>El bot compra y vende ETH de verdad en Bitso con los saldos de tu cuenta.</p>
+    <ul>
+      <li>{{ icon('alert') }} Ejecuta órdenes reales a mercado</li>
+      <li>{{ icon('alert') }} Paga las comisiones reales de Bitso</li>
+      <li>{{ icon('check') }} Requiere API keys configuradas en Exchange API</li>
+    </ul>
+    {% if dry_run %}<span class="mode-cta">Cambiar a live {{ icon('chevron', 'ic-sm') }}</span>{% endif %}
+  </button>
+</div>
+
+<div class="note info mt">
+  {{ icon('shield') }}
+  <div><strong>Cómo se mide cada modo.</strong> Los resultados, el gráfico y las operaciones se guardan por separado:
+    al cambiar de modo, el Resumen muestra solo los datos del modo activo. Ningún dato se borra.</div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function setMode(live) {
+  const ok = await confirmDialog(live
+    ? { title: '¿Activar el modo LIVE?',
+        text: 'El bot va a ejecutar ÓRDENES REALES de ETH en Bitso con tu dinero.\n\n¿Confirmás el cambio a LIVE?',
+        confirm: 'Activar LIVE', danger: true }
+    : { title: '¿Pasar a simulador?',
+        text: 'El bot deja de operar con dinero real y pasa a practicar con la billetera simulada.',
+        confirm: 'Pasar a simulador' });
+  if (!ok) return;
+  const body = new FormData();
+  body.append('dry_run', live ? 'false' : 'true');
+  const d = await apiPost('/api/eth/mode', body, live ? 'Modo LIVE activado' : 'Modo simulador activado');
+  if (d && d.ok !== false) setTimeout(() => location.reload(), 700);
+}
+</script>
+{% endblock %}

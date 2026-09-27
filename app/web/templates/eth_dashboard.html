@@ -1,209 +1,116 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — ETH DGT Bot{% endblock %}
-{% block topbar_title %}Dashboard{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Resumen{% endblock %}
+{% block page_title %}Resumen{% endblock %}
+{% block page_sub %}Cómo viene tu bot en este momento{% endblock %}
 
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<style>
-  .doing { list-style: none; padding: 0; margin: 0; }
-  .doing li { display: flex; gap: 0.75rem; align-items: baseline; padding: 0.55rem 0; border-top: 1px solid var(--border); line-height: 1.5; }
-  .doing li:first-child { border-top: none; padding-top: 0; }
-  .doing .tag { flex: 0 0 86px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-  .doing b { color: var(--text); }
-  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; flex-wrap: wrap;
-                  margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
-  .section-head .section-title { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-  .muted { color: var(--text-muted); font-size: 0.85rem; }
-  .range-btns { display: flex; gap: 0.35rem; }
-  .range-btns button { background: transparent; border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer; }
-  .range-btns button.active { background: rgba(98,126,234,0.15); border-color: var(--accent); color: var(--accent); font-weight: 700; }
-  .chart-legend { display: flex; gap: 1.25rem; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; flex-wrap: wrap; }
-  .chart-legend span::before { content: ""; display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 0.4rem; background: var(--accent); }
-  .chart-legend span.hold::before { background: repeating-linear-gradient(90deg, var(--text-muted) 0 5px, transparent 5px 8px); }
-  .card-value.sm { font-size: 1.45rem; }
-  .chart-box { position: relative; height: 280px; }
-  @media(max-width:540px) { .chart-box { height: 220px; } }
-  td.nowrap { white-space: nowrap; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .sub-strat { display: block; font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; }
-</style>
 {% endblock %}
 
 {% block content %}
 
-<!-- ── Barra superior ───────────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:1.25rem;">
-  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:1.5rem;">
-    <div>
-      <div class="card-title">Precio ETH/USDT</div>
-      <div class="card-value" id="priceVal" style="font-size:1.35rem;">—</div>
-    </div>
-    <div>
-      <div class="card-title">Mercado</div>
-      <span id="regimeBadge" class="badge badge-gray" style="font-size:0.9rem;">—</span>
-      <span class="muted" id="adxVal" style="margin-left:0.35rem;"></span>
-    </div>
-    <div>
-      <div class="card-title">Modo</div>
-      <span id="modeBadge" class="badge badge-gray" style="font-size:0.9rem;">—</span>
-    </div>
-    <div style="margin-left:auto; display:flex; gap:0.6rem; align-items:center;">
-      <button class="btn btn-success" id="btnStart" onclick="startBot()">▶ START</button>
-      <button class="btn btn-danger" id="btnStop" onclick="stopBot()">⏹ STOP</button>
-      <button class="btn btn-secondary btn-sm" onclick="runTick()" title="Correr un ciclo ahora">↻ Tick</button>
-    </div>
+<!-- ── Indicadores ──────────────────────────────────────────────────────── -->
+<div class="grid cols-4">
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Portfolio</span><span class="kpi-icon">{{ icon('wallet') }}</span></div>
+    <div class="kpi-value" id="kpiPort"><span class="skel"></span></div>
+    <div class="kpi-foot"><span id="kpiPortSub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Hoy</span><span class="kpi-icon blue">{{ icon('calendar') }}</span></div>
+    <div class="kpi-value" id="kpiToday"><span class="skel"></span></div>
+    <div class="kpi-foot"><span class="delta" id="kpiTodayPct">—</span><span id="kpiTodaySub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Desde el inicio</span><span class="kpi-icon green">{{ icon('trending') }}</span></div>
+    <div class="kpi-value" id="kpiTotal"><span class="skel"></span></div>
+    <div class="kpi-foot"><span class="delta" id="kpiTotalPct">—</span><span id="kpiTotalSub"></span></div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-head"><span class="kpi-label">Ganancia del bot (neta)</span><span class="kpi-icon yellow">{{ icon('bot') }}</span></div>
+    <div class="kpi-value" id="kpiBot"><span class="skel"></span></div>
+    <div class="kpi-foot"><span id="kpiBotSub"></span></div>
   </div>
 </div>
 
-<!-- ── Qué está haciendo ────────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:1.25rem;">
-  <div class="card-title">Qué está haciendo ahora</div>
-  <ul class="doing" id="doingList"><li><span class="muted">Cargando…</span></li></ul>
-</div>
-
-<!-- ── Resultados ───────────────────────────────────────────────────────── -->
-<div class="section" style="margin-top:0;">
-  <div class="section-head">
-    <div class="section-title">¿Cuánto voy ganando?</div>
-    <div class="muted">
-      <span id="sinceLabel">—</span>
-      <button class="btn btn-secondary btn-sm" id="btnBaseline" onclick="resetBaseline()" style="margin-left:0.5rem; display:none;"
-              title="Usalo después de depositar o retirar fondos">Reiniciar punto de partida</button>
-    </div>
-  </div>
-  <div class="grid-3">
-    <div class="card"><div class="card-title">Hoy</div><div class="card-value" id="todayVal">—</div><div class="card-sub" id="todaySub">—</div></div>
-    <div class="card"><div class="card-title">Desde el inicio</div><div class="card-value" id="totalVal">—</div><div class="card-sub" id="totalSub">—</div></div>
-    <div class="card"><div class="card-title">Ganancia del bot (neta)</div><div class="card-value" id="botVal">—</div><div class="card-sub" id="botSub">—</div></div>
-    <div class="card"><div class="card-title">Vs. no operar</div><div class="card-value sm" id="holdVal">—</div><div class="card-sub" id="holdSub">—</div></div>
-    <div class="card"><div class="card-title">Portfolio</div><div class="card-value sm" id="portVal">—</div><div class="card-sub" id="portSub">—</div></div>
-    <div class="card"><div class="card-title">Ventas con ganancia</div><div class="card-value sm" id="winVal">—</div><div class="card-sub" id="winSub">—</div></div>
-  </div>
-</div>
-
-<!-- ── Gráfico ──────────────────────────────────────────────────────────── -->
-<div class="section">
-  <div class="section-head">
-    <div class="section-title">Valor del portfolio</div>
-    <div class="range-btns" id="rangeBtns">
-      <button data-days="1" class="active">24h</button>
-      <button data-days="7">7d</button>
-      <button data-days="30">30d</button>
-      <button data-days="0">Todo</button>
-    </div>
-  </div>
+<!-- ── Gráfico + estado ─────────────────────────────────────────────────── -->
+<div class="grid cols-main mt">
   <div class="card">
-    <div class="chart-legend"><span>Con el bot</span><span class="hold">Si no hubieras operado</span></div>
-    <div class="chart-box"><canvas id="capitalChart"></canvas></div>
-    <div class="muted" id="chartEmpty" style="display:none; padding:1rem 0;">Todavía no hay datos para este período.</div>
+    <div class="card-head">
+      <div class="card-title">{{ icon('activity') }} Valor del portfolio</div>
+      <div class="seg" id="rangeBtns">
+        <button data-days="1" class="active">24h</button>
+        <button data-days="7">7d</button>
+        <button data-days="30">30d</button>
+        <button data-days="0">Todo</button>
+      </div>
+    </div>
+    <div class="legend"><span><i></i>Con el bot</span><span><i class="dash"></i>Si no hubieras operado</span></div>
+    <div class="chart-box" id="chartBox"><canvas id="capitalChart"></canvas></div>
+    <div class="empty-state" id="chartEmpty" hidden>{{ icon('activity') }}Todavía no hay datos para este período.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div class="card-title">{{ icon('bot') }} Estado del bot</div></div>
+    <div class="status-hero">
+      <span class="status-orb" id="stOrb">{{ icon('bot', 'ic-lg') }}</span>
+      <div>
+        <div class="status-title" id="stTitle"><span class="skel"></span></div>
+        <div class="status-sub" id="stSub"></div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-bottom:1.1rem;">
+      <button class="btn btn-ghost" id="btnPower" disabled>—</button>
+      <button class="btn btn-ghost" id="btnTick" onclick="runTick()" title="Correr un chequeo ahora sin esperar">{{ icon('refresh', 'ic-sm') }} Chequear ahora</button>
+    </div>
+    <div class="kv"><span>Mercado</span><span class="badge" id="regimeBadge">—</span></div>
+    <div class="adx">
+      <div class="adx-head"><span>Fuerza de tendencia (ADX)</span><b id="adxVal">—</b></div>
+      <div class="adx-bar">
+        <div class="adx-fill" id="adxFill" style="width:0"></div>
+        <div class="adx-mark" style="left:{{ (adx_threshold / 50 * 100) | round(1) }}%" title="Umbral {{ adx_threshold | int }}"></div>
+      </div>
+      <div class="adx-legend"><span>Lateral &lt; {{ adx_threshold | int }}</span><span>Tendencia ≥ {{ adx_threshold | int }}</span></div>
+    </div>
+    <div class="kv"><span>Modo</span><a href="/modo" class="badge" id="modeBadge">—</a></div>
+    <div class="kv"><span>Escalón de la grilla</span><b id="stepVal">—</b></div>
   </div>
 </div>
 
-<!-- ── Día a día ────────────────────────────────────────────────────────── -->
-<div class="section">
-  <div class="section-title">Día a día</div>
-  <div class="card table-wrap">
-    <table>
-      <thead><tr>
-        <th>Día</th><th class="num">Valor al cierre</th><th class="num">Variación</th>
-        <th class="num">Ganancia bot</th><th class="num">Compras / ventas</th><th class="num">Precio ETH</th>
-      </tr></thead>
-      <tbody id="daysBody"><tr><td colspan="6" class="muted">Sin datos todavía.</td></tr></tbody>
-    </table>
+<!-- ── Grilla + actividad ───────────────────────────────────────────────── -->
+<div class="grid cols-2 mt">
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">{{ icon('layers') }} Grilla de precios</div>
+      <span class="card-sub" id="gridSub"></span>
+    </div>
+    <div class="plan">
+      <div class="plan-tile buy">
+        <div class="plan-head">{{ icon('down', 'ic-sm') }} Próxima compra</div>
+        <div class="plan-price" id="nbPrice"><span class="skel"></span></div>
+        <div class="plan-sub" id="nbSub"></div>
+      </div>
+      <div class="plan-tile sell">
+        <div class="plan-head">{{ icon('up', 'ic-sm') }} Próxima venta</div>
+        <div class="plan-price" id="nsPrice"><span class="skel"></span></div>
+        <div class="plan-sub" id="nsSub"></div>
+      </div>
+    </div>
+    <div class="ladder" id="ladder"></div>
+    <div class="ladder-legend">
+      <span class="t-neg"><i></i>Venta</span>
+      <span class="t-pos"><i></i>Compra</span>
+      <span style="color:var(--accent)"><i></i>Precio actual</span>
+    </div>
   </div>
-</div>
 
-<!-- ── Grid ─────────────────────────────────────────────────────────────── -->
-<div class="section">
-  <div class="section-title">Niveles del grid</div>
-  <div class="card table-wrap">
-    <table>
-      <thead><tr><th>Tipo</th><th class="num">Precio</th><th class="num">Distancia</th><th class="num">Monto aprox.</th></tr></thead>
-      <tbody id="gridBody"><tr><td colspan="4" class="muted">Sin grid activo.</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ── Trades ───────────────────────────────────────────────────────────── -->
-<div class="section">
-  <div class="section-title">Últimas operaciones</div>
-  <div class="card table-wrap">
-    <table>
-      <thead><tr>
-        <th>Fecha</th><th>Operación</th><th class="num">Precio</th><th class="num">ETH</th>
-        <th class="num">Monto</th><th class="num">Comisión</th><th class="num">Resultado neto</th>
-      </tr></thead>
-      <tbody id="tradesBody"><tr><td colspan="7" class="muted">Sin operaciones todavía.</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ── Toggle simulador / live ──────────────────────────────────────────── -->
-<div class="card" style="margin-top:1.25rem; display:flex; align-items:center; gap:1rem;">
-  <div>
-    <div class="card-title">Modo de operación</div>
-    <div class="card-sub" id="modeLabel">—</div>
-  </div>
-  <label class="switch" style="margin-left:auto;">
-    <input type="checkbox" id="modeToggle" onchange="onModeToggle()">
-    <span class="slider"></span>
-  </label>
-  <span id="modeText" style="font-weight:700; min-width:110px; text-align:right;">SIMULADOR</span>
-</div>
-
-<!-- ── Ayuda ────────────────────────────────────────────────────────── -->
-<div class="section" id="ayuda">
-  <div class="section-title">Ayuda</div>
-  <div class="card" style="line-height:1.8; font-size:0.92rem; color:var(--text-muted);">
-
-    <div style="margin-bottom:1.25rem;">
-      <strong style="color:var(--text); font-size:1rem;">¿Qué es este bot?</strong><br>
-      Un programa que compra y vende Ethereum (ETH) por vos en Bitso usando USDT (dólares digitales).
-      Busca ganar un poco en cada subida y bajada normal del precio.
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">{{ icon('swap') }} Últimas operaciones</div>
+      <a href="/operaciones" class="card-link">Ver todas {{ icon('chevron', 'ic-sm') }}</a>
     </div>
-
-    <div style="margin-bottom:1.25rem;">
-      <strong style="color:var(--text); font-size:1rem;">¿Cómo funciona?</strong><br>
-      Usa <strong style="color:var(--accent);">grid trading</strong>: arma una "grilla" de precios alrededor del precio actual.
-      Si ETH baja hasta un nivel de compra, compra un poco. Cada compra queda con su propio objetivo de venta un escalón
-      más arriba (~1.25%), suficiente para cubrir las comisiones de Bitso (~0.72% ida y vuelta) y dejar ganancia.
-      La grilla se mantiene fija; solo se rearma si el precio se aleja mucho, y nunca pone a la venta ETH por debajo de lo que costó.
-      Revisa el precio cada 15 minutos.
-    </div>
-
-    <div style="margin-bottom:1.25rem;">
-      <strong style="color:var(--text); font-size:1rem;">¿Cómo leer los resultados?</strong>
-      <ul style="margin-top:0.4rem; padding-left:1.4rem;">
-        <li><strong style="color:var(--text);">Hoy / Desde el inicio</strong> — Cuánto cambió el valor total de tu portfolio (USDT + ETH).
-          Incluye la suba o baja del precio de ETH que tenés en cartera, no solo lo que hizo el bot.</li>
-        <li><strong style="color:var(--text);">Ganancia del bot (neta)</strong> — Lo que ganó el bot con ventas ya cerradas:
-          USDT recibidos (ya descontada la comisión de venta) menos lo que costó ese ETH (incluida la comisión de compra).
-          Las comisiones son las reales que cobró Bitso; si aparece "≈", Bitso no confirmó el dato y se estimó con 0,36%.</li>
-        <li><strong style="color:var(--text);">Vs. no operar</strong> — Diferencia entre tu portfolio actual y lo que tendrías si
-          hubieras dejado todo como estaba al inicio. Positivo = el bot te dejó más plata que no hacer nada.</li>
-        <li><strong style="color:var(--text);">Reiniciar punto de partida</strong> — Si depositás o retirás plata en Bitso, tocá este botón
-          para que el depósito no cuente como ganancia (o el retiro como pérdida).</li>
-      </ul>
-    </div>
-
-    <div style="margin-bottom:1.25rem;">
-      <strong style="color:var(--text); font-size:1rem;">Mercado</strong>
-      <ul style="margin-top:0.4rem; padding-left:1.4rem;">
-        <li><strong style="color:var(--text);">Lateral</strong> — El precio va y viene (ADX &lt; 25). Es el escenario ideal para la grilla.</li>
-        <li><strong style="color:var(--text);">Tendencia</strong> — Hay una tendencia fuerte (ADX ≥ 25). El bot puede operar rupturas de precio.</li>
-      </ul>
-    </div>
-
-    <div>
-      <strong style="color:var(--text); font-size:1rem;">Controles</strong>
-      <ul style="margin-top:0.4rem; padding-left:1.4rem;">
-        <li><strong style="color:var(--green);">START / STOP</strong> — Enciende o apaga el bot.</li>
-        <li><strong style="color:var(--text);">Tick</strong> — Hace un chequeo ahora sin esperar los 15 minutos.</li>
-        <li><strong style="color:var(--blue);">SIMULADOR</strong> / <strong style="color:var(--red);">LIVE</strong> — Simulación sin plata real
-          (misma lógica y mismas comisiones que en real), u operaciones reales en Bitso.</li>
-      </ul>
-    </div>
-
+    <ul class="activity" id="recentList"><li><span class="skel" style="width:100%"></span></li></ul>
   </div>
 </div>
 
@@ -211,73 +118,22 @@
 
 {% block scripts %}
 <script>
-const REFRESH_MS = {{ auto_refresh_seconds }} * 1000;
-const S = { status: null, grid: null, trades: null, perf: null, bal: null };
-let capitalChart = null;
+const ADX_THRESHOLD = {{ adx_threshold }};
+const ADX_SCALE = 50;
+const STRAT = { grid: 'grid', breakout: 'ruptura', profit_take: 'toma de ganancia' };
+const S = { grid: null, trades: null, perf: null, bal: null };
+let chart = null;
 let chartDays = 1;
-let currentDryRun = {{ 'true' if dry_run else 'false' }};
 
-// ── Formato ─────────────────────────────────────────────────────────────
-const nf = (v, d = 2) => Number(v).toLocaleString('es-AR', { minimumFractionDigits: d, maximumFractionDigits: d });
-function usd(v, d = 2) { return (v === null || v === undefined) ? '$—' : '$' + nf(v, d); }
-function signedUsd(v) {
-  if (v === null || v === undefined) return '$—';
-  const d = Math.abs(v) < 1 && v !== 0 ? 3 : 2;
-  return (v > 0 ? '+' : v < 0 ? '−' : '') + '$' + nf(Math.abs(v), d);
-}
-function signedPct(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + nf(Math.abs(v || 0), 2) + '%'; }
-function cls(v) { return v > 0 ? 'var-pos' : (v < 0 ? 'var-neg' : 'var-neu'); }
-function setVal(id, text, v) { const el = document.getElementById(id); el.textContent = text; el.classList.remove('var-pos', 'var-neg', 'var-neu'); if (v !== undefined) el.classList.add(cls(v)); }
-function ago(iso) {
-  if (!iso) return '';
-  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return 'recién';
-  if (m < 60) return `hace ${m} min`;
-  const h = Math.round(m / 60);
-  if (h < 48) return `hace ${h} h`;
-  return `hace ${Math.round(h / 24)} días`;
-}
-function hhmm(iso) { return iso ? new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '—'; }
-async function getJson(url) { const r = await fetch(url); if (!r.ok) throw new Error(r.status); return r.json(); }
-
-// ── Barra superior / modo ───────────────────────────────────────────────
-function renderStatus() {
-  const d = S.status; if (!d) return;
-  const rb = document.getElementById('regimeBadge');
-  if (d.regime === 'grid') { rb.textContent = 'Lateral'; rb.className = 'badge badge-blue'; }
-  else if (d.regime === 'breakout') { rb.textContent = 'Tendencia'; rb.className = 'badge badge-purple'; }
-  else { rb.textContent = '—'; rb.className = 'badge badge-gray'; }
-  document.getElementById('adxVal').textContent = d.adx !== null ? 'ADX ' + nf(d.adx, 1) : '';
-  const price = (S.bal && S.bal.ok && S.bal.price) || d.price;
-  document.getElementById('priceVal').textContent = price ? usd(price) : '—';
-
-  const on = d.bot_status === 'on';
-  document.getElementById('btnStart').disabled = on;
-  document.getElementById('btnStop').disabled = !on;
-
-  currentDryRun = d.dry_run;
-  const mb = document.getElementById('modeBadge');
-  mb.textContent = currentDryRun ? 'SIMULADOR' : 'LIVE · dinero real';
-  mb.className = 'badge ' + (currentDryRun ? 'badge-blue' : 'badge-red');
-  document.getElementById('btnBaseline').textContent = currentDryRun ? 'Reiniciar simulación' : 'Reiniciar punto de partida';
-  syncModeUI();
-}
-
-function syncModeUI() {
-  document.getElementById('modeToggle').checked = !currentDryRun;
-  document.getElementById('modeText').textContent = currentDryRun ? 'SIMULADOR' : 'LIVE';
-  document.getElementById('modeText').style.color = currentDryRun ? 'var(--blue)' : 'var(--red)';
-  document.getElementById('modeLabel').textContent = currentDryRun
-    ? 'El bot simula operaciones sin ejecutar órdenes reales.'
-    : '⚠ El bot ejecuta órdenes reales en el exchange.';
-}
+const isDryRun = () => Shell.status ? Shell.status.dry_run : {{ 'true' if dry_run else 'false' }};
+const livePrice = () => (S.bal && S.bal.ok && S.bal.price) || (S.grid && S.grid.current_price) || (Shell.status && Shell.status.price) || null;
 
 // ── Tamaños estimados de la próxima compra / venta ──────────────────────
 function nextOrderSizes() {
   const g = S.grid || {};
   const nb = (g.buy_levels || []).length, ns = (g.sell_levels || []).length;
   const bal = S.bal && S.bal.ok ? S.bal : null;
-  if (!currentDryRun && bal) {
+  if (!isDryRun() && bal) {
     return {
       buyUsd: nb ? bal.usdt_available / nb : 0,
       sellEth: ns ? bal.eth_available / ns : 0,
@@ -288,164 +144,164 @@ function nextOrderSizes() {
   return { buyUsd: per, sellEth: null, usdt: null, eth: null, per };
 }
 
-// ── Qué está haciendo ───────────────────────────────────────────────────
-function renderDoing() {
-  const st = S.status, g = S.grid || {};
-  if (!st) return;
-  const items = [];
-  const price = (S.bal && S.bal.ok && S.bal.price) || g.current_price || st.price;
-  const sz = nextOrderSizes();
-
-  if (st.bot_status !== 'on') {
-    items.push(['Estado', '<b>Apagado.</b> No compra ni vende hasta que toques START.']);
-  } else {
-    const next = st.next_tick ? ` Próximo chequeo: <b>${hhmm(st.next_tick)}</b>.` : '';
-    items.push(['Estado', `<b>Encendido</b>, revisa el precio cada 15 minutos.${next}`]);
-    const buys = g.buy_levels || [], sells = g.sell_levels || [];
-    if (buys.length && price) {
-      const lvl = Math.max(...buys);
-      const pct = (lvl - price) / price * 100;
-      if (sz.usdt !== null && sz.usdt < 1) {
-        items.push(['Compra', `Próximo nivel en <b>${usd(lvl)}</b> (${signedPct(pct)}), pero no hay USDT libre: primero tiene que vender.`]);
-      } else {
-        items.push(['Compra', `Si ETH baja a <b>${usd(lvl)}</b> (${signedPct(pct)} desde ${usd(price)}), compra ≈ <b>${usd(sz.buyUsd)}</b> de ETH.`]);
-      }
-    } else {
-      items.push(['Compra', 'Sin niveles de compra pendientes.']);
-    }
-    if (sells.length && price) {
-      const lvl = Math.min(...sells);
-      const pct = (lvl - price) / price * 100;
-      if (sz.eth !== null && sz.eth < 1e-6) {
-        items.push(['Venta', `Próximo nivel en <b>${usd(lvl)}</b> (${signedPct(pct)}), pero no hay ETH en cartera: primero tiene que comprar.`]);
-      } else {
-        const eth = sz.sellEth !== null ? sz.sellEth : (sz.per || 0) / lvl;
-        items.push(['Venta', `Si ETH sube a <b>${usd(lvl)}</b> (${signedPct(pct)}), vende ≈ <b>${nf(eth, 5)} ETH</b> (≈ ${usd(eth * lvl)}).`]);
-      }
-    } else {
-      items.push(['Venta', 'Sin niveles de venta pendientes.']);
-    }
+// ── Indicadores ─────────────────────────────────────────────────────────
+function renderKpis() {
+  const p = S.perf, b = S.bal && S.bal.ok ? S.bal : null;
+  if (!isDryRun() && b) {
+    setVal('kpiPort', usd(b.portfolio_usd));
+    setText('kpiPortSub', `${nf(b.usdt_total, 2)} USDT · ${nf(b.eth_total, 5)} ETH`);
+  } else if (p && p.ready) {
+    setVal('kpiPort', usd(p.current_value));
+    setText('kpiPortSub', isDryRun() ? 'Capital simulado' : 'Según el último chequeo');
   }
-
-  const last = S.trades && S.trades.trades && S.trades.trades[0];
-  if (last) {
-    const verb = last.side === 'buy' ? 'Compró' : 'Vendió';
-    const res = last.side === 'sell' ? ` · resultado <span class="${cls(last.net)}">${signedUsd(last.net)}</span>` : '';
-    items.push(['Última', `${verb} <b>${nf(last.amount_eth, 5)} ETH</b> a ${usd(last.price)} (${usd(last.amount_usd)}) ${ago(last.ts_iso)}${res}.`]);
-  } else {
-    items.push(['Última', 'Todavía no hizo operaciones.']);
-  }
-
-  document.getElementById('doingList').innerHTML =
-    items.map(([t, h]) => `<li><span class="tag">${t}</span><span>${h}</span></li>`).join('');
-}
-
-// ── Resultados ──────────────────────────────────────────────────────────
-function renderPerf() {
-  const p = S.perf;
-  if (!p || !p.ready) {
-    document.getElementById('sinceLabel').textContent = 'El punto de partida se fija en el próximo chequeo.';
+  if (!p) return;
+  if (!p.ready) {
+    ['kpiToday', 'kpiTotal', 'kpiBot'].forEach(id => setVal(id, '—'));
+    if (!b) setVal('kpiPort', '—');
+    setText('kpiBotSub', 'El punto de partida se fija en el próximo chequeo');
     return;
   }
-  document.getElementById('sinceLabel').textContent = `Midiendo desde ${p.since} (${usd(p.start_value)})`;
+  const t = p.today, nOps = t.buys + t.sells;
+  setVal('kpiToday', signedUsd(t.change), t.change);
+  setDelta('kpiTodayPct', signedPct(t.change_pct), t.change_pct);
+  setText('kpiTodaySub', `${nOps} ${nOps === 1 ? 'operación' : 'operaciones'} · bot ${signedUsd(t.bot_net)}`);
 
-  const t = p.today;
-  setVal('todayVal', signedUsd(t.change), t.change);
-  const nOps = t.buys + t.sells;
-  document.getElementById('todaySub').textContent =
-    `${signedPct(t.change_pct)} · ${nOps} ${nOps === 1 ? 'operación' : 'operaciones'} · bot ${signedUsd(t.bot_net)}`;
+  setVal('kpiTotal', signedUsd(p.total_change), p.total_change);
+  setDelta('kpiTotalPct', signedPct(p.total_change_pct), p.total_change_pct);
+  setText('kpiTotalSub', `de ${usd(p.start_value)} a ${usd(p.current_value)}`);
 
-  setVal('totalVal', signedUsd(p.total_change), p.total_change);
-  document.getElementById('totalSub').textContent = `${signedPct(p.total_change_pct)} · de ${usd(p.start_value)} a ${usd(p.current_value)}`;
-
-  setVal('botVal', signedUsd(p.bot_net), p.bot_net);
-  document.getElementById('botSub').textContent =
-    `${p.sells} ventas cerradas · comisiones pagadas ${usd(p.fees)}${p.dry_run ? ' (simuladas)' : ''}`;
-
-  setVal('holdVal', signedUsd(p.vs_hold), p.vs_hold);
-  document.getElementById('holdSub').textContent = `Sin operar tendrías ${usd(p.hold_value)}`;
-
-  setVal('winVal', p.win_rate === null ? '—' : nf(p.win_rate, 0) + '%');
-  document.getElementById('winSub').textContent = p.sells ? `de ${p.sells} ventas, después de comisiones` : 'Todavía no cerró ventas';
-
-  renderPortfolio();
-  renderDays();
+  setVal('kpiBot', signedUsd(p.bot_net), p.bot_net);
+  setText('kpiBotSub', `${p.sells} ${p.sells === 1 ? 'venta cerrada' : 'ventas cerradas'} · comisiones ${usd(p.fees)}${p.dry_run ? ' (simuladas)' : ''}`);
 }
 
-function renderPortfolio() {
-  const b = S.bal && S.bal.ok ? S.bal : null;
-  if (!currentDryRun && b) {
-    setVal('portVal', usd(b.portfolio_usd));
-    document.getElementById('portSub').textContent = `${nf(b.usdt_total, 2)} USDT · ${nf(b.eth_total, 5)} ETH (${usd(b.eth_value_usd)})`;
-  } else if (S.perf && S.perf.ready) {
-    setVal('portVal', usd(S.perf.current_value));
-    document.getElementById('portSub').textContent = currentDryRun ? 'Capital simulado' : 'Último chequeo';
-  }
+// ── Estado del bot ──────────────────────────────────────────────────────
+function renderControl() {
+  const s = Shell.status; if (!s) return;
+  const on = s.bot_status === 'on';
+  $('stOrb').className = 'status-orb' + (on ? ' on' : '');
+  setText('stTitle', on ? 'Encendido' : 'Apagado');
+  const last = s.updated_at ? `Último chequeo ${ago(s.updated_at)}` : 'Todavía no hizo chequeos';
+  setText('stSub', on ? `${last} · revisa el precio cada 15 min` : 'No compra ni vende hasta que lo enciendas');
+
+  const bp = $('btnPower');
+  bp.disabled = false;
+  bp.className = 'btn ' + (on ? 'btn-danger' : 'btn-success');
+  bp.innerHTML = on ? icon('stop', 'ic-sm') + ' Detener' : icon('play', 'ic-sm') + ' Encender';
+  bp.onclick = on ? stopBot : startBot;
+
+  const rb = $('regimeBadge');
+  if (s.regime === 'grid') { rb.textContent = 'Lateral'; rb.className = 'badge badge-blue'; }
+  else if (s.regime === 'breakout') { rb.textContent = 'Tendencia'; rb.className = 'badge badge-purple'; }
+  else { rb.textContent = '—'; rb.className = 'badge'; }
+
+  const adx = s.adx;
+  setText('adxVal', adx !== null ? nf(adx, 1) : '—');
+  $('adxFill').style.width = adx !== null ? Math.min(100, adx / ADX_SCALE * 100) + '%' : '0';
+  $('adxFill').classList.toggle('trend', adx !== null && adx >= ADX_THRESHOLD);
+
+  const mb = $('modeBadge');
+  mb.textContent = s.dry_run ? 'Simulador' : 'Live · dinero real';
+  mb.className = 'badge ' + (s.dry_run ? 'badge-blue' : 'badge-red');
 }
 
-function renderDays() {
-  const rows = (S.perf && S.perf.days) || [];
-  const tb = document.getElementById('daysBody');
-  if (!rows.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Sin datos todavía.</td></tr>'; return; }
-  tb.innerHTML = rows.map(r => {
-    const [y, m, d] = r.date.split('-').map(Number);
-    const label = new Date(y, m - 1, d).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-    return `<tr>
-      <td class="nowrap">${label}</td>
-      <td class="num">${usd(r.close_value)}</td>
-      <td class="num ${cls(r.change)}">${signedUsd(r.change)} <span class="muted">(${signedPct(r.change_pct)})</span></td>
-      <td class="num ${cls(r.bot_net)}">${r.buys + r.sells ? signedUsd(r.bot_net) : '—'}</td>
-      <td class="num">${r.buys} / ${r.sells}</td>
-      <td class="num">${r.eth_price ? usd(r.eth_price) : '—'}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ── Trades ──────────────────────────────────────────────────────────────
-const STRAT = { grid: 'grid', breakout: 'ruptura', profit_take: 'toma de ganancia' };
-function renderTrades() {
-  const d = S.trades; if (!d) return;
-  const tb = document.getElementById('tradesBody');
-  if (!d.trades.length) { tb.innerHTML = '<tr><td colspan="7" class="muted">Sin operaciones todavía.</td></tr>'; return; }
-  tb.innerHTML = d.trades.map(t => {
-    const side = t.side === 'buy' ? '<span class="badge badge-green">COMPRA</span>' : '<span class="badge badge-red">VENTA</span>';
-    const est = t.fee_estimated ? '≈ ' : '';
-    const res = t.side === 'sell' ? `<span class="${cls(t.net)}">${est}${signedUsd(t.net)}</span>` : '<span class="muted">—</span>';
-    const feeTitle = t.fee_estimated ? 'Estimada con la comisión configurada' : `Real: ${t.fee_amount} ${String(t.fee_currency || '').toUpperCase()}`;
-    return `<tr><td>${t.timestamp}</td>
-      <td>${side}<span class="sub-strat">${STRAT[t.strategy] || t.strategy}</span></td>
-      <td class="num">${usd(t.price)}</td><td class="num">${nf(t.amount_eth, 5)}</td>
-      <td class="num">${usd(t.amount_usd)}</td>
-      <td class="num" title="${feeTitle}">${t.fee ? est + usd(t.fee, 3) : '—'}</td>
-      <td class="num">${res}</td></tr>`;
-  }).join('');
-}
-
-// ── Grid ────────────────────────────────────────────────────────────────
+// ── Grilla ──────────────────────────────────────────────────────────────
 function renderGrid() {
-  const d = S.grid; if (!d) return;
-  const tb = document.getElementById('gridBody');
-  const price = (S.bal && S.bal.ok && S.bal.price) || d.current_price;
-  const buys = (d.buy_levels || []), sells = (d.sell_levels || []);
-  if (!buys.length && !sells.length) { tb.innerHTML = '<tr><td colspan="4" class="muted">Sin grid activo.</td></tr>'; return; }
+  const g = S.grid; if (!g) return;
+  const price = livePrice();
+  const buys = [...(g.buy_levels || [])].sort((a, b) => b - a);
+  const sells = [...(g.sell_levels || [])].sort((a, b) => b - a);
+  const nextBuy = buys.length ? buys[0] : null;
+  const nextSell = sells.length ? sells[sells.length - 1] : null;
   const sz = nextOrderSizes();
-  const nextBuy = buys.length ? Math.max(...buys) : null, nextSell = sells.length ? Math.min(...sells) : null;
-  const row = (type, p) => {
-    const dist = price ? signedPct((p - price) / price * 100) : '—';
-    const isNext = (type === 'buy' && p === nextBuy) || (type === 'sell' && p === nextSell);
-    const badge = type === 'buy' ? '<span class="badge badge-green">COMPRA</span>' : '<span class="badge badge-red">VENTA</span>';
-    let amount = '—';
-    if (type === 'buy') amount = usd(sz.buyUsd);
-    else if (sz.sellEth !== null) amount = `${nf(sz.sellEth, 5)} ETH`;
-    else if (sz.per) amount = usd(sz.per);
-    return `<tr><td>${badge}${isNext ? ' <span class="badge badge-accent">próximo</span>' : ''}</td>
-      <td class="num">${usd(p)}</td><td class="num">${dist}</td><td class="num">${amount}</td></tr>`;
-  };
-  const rows = [];
-  [...sells].sort((a, b) => b - a).forEach(p => rows.push(row('sell', p)));
-  rows.push(`<tr style="background:rgba(98,126,234,0.08);"><td colspan="4" style="text-align:center; font-weight:700; color:var(--accent);">◀ PRECIO ACTUAL: ${usd(price)} ▶</td></tr>`);
-  [...buys].sort((a, b) => b - a).forEach(p => rows.push(row('buy', p)));
-  tb.innerHTML = rows.join('');
+
+  setText('gridSub', buys.length + sells.length ? `${buys.length} de compra · ${sells.length} de venta` : '');
+  setText('stepVal', g.grid_step && price ? `${usd(g.grid_step)} (${nf(g.grid_step / price * 100, 2)}%)` : '—');
+
+  if (nextBuy !== null && price) {
+    const pct = signedPct((nextBuy - price) / price * 100);
+    setText('nbPrice', usd(nextBuy));
+    setText('nbSub', sz.usdt !== null && sz.usdt < 1
+      ? `${pct} · sin USDT libre: primero tiene que vender`
+      : `${pct} · compra ≈ ${usd(sz.buyUsd)}`);
+  } else {
+    setText('nbPrice', '—'); setText('nbSub', 'Sin niveles de compra pendientes');
+  }
+  if (nextSell !== null && price) {
+    const pct = signedPct((nextSell - price) / price * 100);
+    setText('nsPrice', usd(nextSell));
+    if (sz.eth !== null && sz.eth < 1e-6) {
+      setText('nsSub', `${pct} · sin ETH: primero tiene que comprar`);
+    } else {
+      const eth = sz.sellEth !== null ? sz.sellEth : (sz.per || 0) / nextSell;
+      setText('nsSub', `${pct} · vende ≈ ${nf(eth, 5)} ETH (${usd(eth * nextSell)})`);
+    }
+  } else {
+    setText('nsPrice', '—'); setText('nsSub', 'Sin niveles de venta pendientes');
+  }
+  renderLadder(buys, sells, price, nextBuy, nextSell);
+}
+
+function renderLadder(buys, sells, price, nextBuy, nextSell) {
+  const el = $('ladder');
+  const items = [...sells.map(p => ({ p, type: 'sell' })), ...buys.map(p => ({ p, type: 'buy' }))];
+  if (!items.length || !price) {
+    el.style.height = '';
+    el.innerHTML = `<div class="empty-state">${icon('layers')}Sin grilla activa todavía.</div>`;
+    return;
+  }
+  items.push({ p: price, type: 'now' });
+  items.sort((a, b) => b.p - a.p);
+
+  // Posición proporcional al precio, separando las etiquetas que quedarían encimadas
+  const GAP = 26, PAD = 14;
+  const H = Math.max(300, items.length * GAP + 2 * PAD);
+  el.style.height = H + 'px';
+  const hi = items[0].p, lo = items[items.length - 1].p, span = (hi - lo) || 1;
+  const ys = items.map(it => PAD + (hi - it.p) / span * (H - 2 * PAD));
+  for (let i = 1; i < ys.length; i++) if (ys[i] - ys[i - 1] < GAP) ys[i] = ys[i - 1] + GAP;
+  const over = ys[ys.length - 1] - (H - PAD);
+  if (over > 0) {
+    ys[ys.length - 1] -= over;
+    for (let i = ys.length - 2; i >= 0; i--) if (ys[i + 1] - ys[i] < GAP) ys[i] = ys[i + 1] - GAP;
+  }
+
+  const yOf = (type, p) => ys[items.findIndex(it => it.type === type && it.p === p)];
+  let zone = '';
+  if (nextSell !== null && nextBuy !== null) {
+    const top = yOf('sell', nextSell), bottom = yOf('buy', nextBuy);
+    zone = `<div class="ladder-zone" style="top:${top}px; height:${bottom - top}px" title="Zona de espera: entre la próxima venta y la próxima compra"></div>`;
+  }
+  el.innerHTML = zone + items.map((it, i) => {
+    if (it.type === 'now') {
+      return `<div class="lv now" style="top:${ys[i]}px"><span class="lv-price">${usd(it.p)}</span><span class="lv-line"></span><span class="now-tag">Ahora</span></div>`;
+    }
+    const next = (it.type === 'buy' && it.p === nextBuy) || (it.type === 'sell' && it.p === nextSell);
+    return `<div class="lv ${it.type}${next ? ' next' : ''}" style="top:${ys[i]}px">
+      <span class="lv-price">${usd(it.p)}</span><span class="lv-line"></span>
+      <span class="lv-dist">${signedPct((it.p - price) / price * 100)}</span></div>`;
+  }).join('');
+}
+
+// ── Actividad reciente ──────────────────────────────────────────────────
+function renderRecent() {
+  if (!S.trades) return;
+  const list = S.trades.trades.slice(0, 6);
+  if (!list.length) {
+    $('recentList').innerHTML = `<li class="empty-state">${icon('swap')}Todavía no hizo operaciones.</li>`;
+    return;
+  }
+  $('recentList').innerHTML = list.map(t => {
+    const buy = t.side === 'buy';
+    const est = t.fee_estimated ? '≈ ' : '';
+    const res = buy
+      ? `<div class="sub faint">comisión ${t.fee ? est + usd(t.fee, 3) : '—'}</div>`
+      : `<div class="sub ${cls(t.net)}">${est}${signedUsd(t.net)}</div>`;
+    return `<li>
+      <span class="side-ic ${t.side}">${icon(buy ? 'down' : 'up')}</span>
+      <div class="act-main"><b>${buy ? 'Compró' : 'Vendió'}</b> ${nf(t.amount_eth, 5)} ETH <span class="muted">a ${usd(t.price)}</span>
+        <div class="sub">${t.timestamp} · ${ago(t.ts_iso)} · ${STRAT[t.strategy] || t.strategy}</div></div>
+      <div class="act-amt">${usd(t.amount_usd)}${res}</div></li>`;
+  }).join('');
 }
 
 // ── Gráfico ─────────────────────────────────────────────────────────────
@@ -453,43 +309,54 @@ async function loadChart() {
   let d;
   try { d = await getJson('/api/eth/history?days=' + chartDays); } catch (e) { return; }
   const pts = d.points || [];
-  document.getElementById('chartEmpty').style.display = pts.length ? 'none' : 'block';
-  document.querySelector('.chart-box').style.display = pts.length ? '' : 'none';
+  $('chartEmpty').hidden = pts.length > 0;
+  $('chartBox').hidden = pts.length === 0;
   const labels = pts.map(p => p.timestamp);
   const cap = pts.map(p => p.capital), hold = pts.map(p => p.hold);
-  if (!capitalChart) {
-    capitalChart = new Chart(document.getElementById('capitalChart').getContext('2d'), {
-      type: 'line',
-      data: { labels, datasets: [
-        { label: 'Con el bot', data: cap, borderColor: '#627eea', backgroundColor: 'rgba(98,126,234,0.12)',
-          fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 },
-        { label: 'Sin operar', data: hold, borderColor: '#8b949e', borderDash: [5, 4],
-          fill: false, tension: 0.25, pointRadius: 0, borderWidth: 1.5 },
-      ]},
-      options: {
-        responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: {
-            title: items => pts[items[0].dataIndex] ? pts[items[0].dataIndex].label : '',
-            label: c => `${c.dataset.label}: ${usd(c.parsed.y)}`,
-          }},
-        },
-        scales: {
-          x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, grid: { color: 'rgba(48,54,61,0.4)' } },
-          y: { ticks: { color: '#8b949e', callback: v => '$' + nf(v, 2) }, grid: { color: 'rgba(48,54,61,0.4)' } },
+  const title = items => pts[items[0].dataIndex] ? pts[items[0].dataIndex].label : '';
+  const footer = items => pts[items[0].dataIndex] && pts[items[0].dataIndex].price ? 'ETH ' + usd(pts[items[0].dataIndex].price) : '';
+  if (chart) {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = cap;
+    chart.data.datasets[1].data = hold;
+    chart.options.plugins.tooltip.callbacks.title = title;
+    chart.options.plugins.tooltip.callbacks.footer = footer;
+    chart.update('none');
+    return;
+  }
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  const ctx = $('capitalChart').getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 300);
+  grad.addColorStop(0, 'rgba(124,140,255,0.32)');
+  grad.addColorStop(1, 'rgba(124,140,255,0)');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Con el bot', data: cap, borderColor: '#7c8cff', backgroundColor: grad, fill: true,
+        tension: 0.3, pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: '#7c8cff', borderWidth: 2.2 },
+      { label: 'Sin operar', data: hold, borderColor: 'rgba(139,149,169,0.75)', borderDash: [5, 4], fill: false,
+        tension: 0.3, pointRadius: 0, pointHoverRadius: 3, borderWidth: 1.5 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c2331', borderColor: 'rgba(148,163,184,0.18)', borderWidth: 1, padding: 12,
+          titleColor: '#e8ecf4', bodyColor: '#c3cad8', footerColor: '#8b95a9', footerFont: { weight: '500' },
+          cornerRadius: 10, boxPadding: 4, usePointStyle: true,
+          callbacks: { title, footer, label: c => ` ${c.dataset.label}: ${usd(c.parsed.y)}` },
         },
       },
-    });
-  } else {
-    capitalChart.data.labels = labels;
-    capitalChart.data.datasets[0].data = cap;
-    capitalChart.data.datasets[1].data = hold;
-    capitalChart.options.plugins.tooltip.callbacks.title = items => pts[items[0].dataIndex] ? pts[items[0].dataIndex].label : '';
-    capitalChart.update('none');
-  }
+      scales: {
+        x: { ticks: { color: '#5b657a', maxTicksLimit: 7, maxRotation: 0 }, grid: { display: false }, border: { display: false } },
+        y: { ticks: { color: '#5b657a', callback: v => '$' + nf(v, 2), maxTicksLimit: 6 },
+             grid: { color: 'rgba(148,163,184,0.07)' }, border: { display: false } },
+      },
+    },
+  });
 }
-document.getElementById('rangeBtns').addEventListener('click', e => {
+$('rangeBtns').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   chartDays = Number(b.dataset.days);
   document.querySelectorAll('#rangeBtns button').forEach(x => x.classList.toggle('active', x === b));
@@ -497,50 +364,53 @@ document.getElementById('rangeBtns').addEventListener('click', e => {
 });
 
 // ── Acciones ────────────────────────────────────────────────────────────
-async function startBot() { await apiPost('/api/eth/bot/start', null, 'Bot iniciado'); refreshAll(); }
-async function stopBot() { await apiPost('/api/eth/bot/stop', null, 'Bot detenido'); refreshAll(); }
-async function runTick() {
-  toast('Ejecutando chequeo…');
-  const d = await (await fetch('/api/eth/tick', { method: 'POST' })).json();
-  if (d.ok) { toast('Chequeo listo: ' + d.action); refreshAll(); } else { toast('Error en el chequeo', false); }
-}
-async function resetBaseline() {
-  const ok = confirm(currentDryRun
-    ? '¿Reiniciar la simulación?\n\nLa billetera simulada vuelve al capital inicial y las operaciones simuladas anteriores dejan de contar.'
-    : '¿Reiniciar el punto de partida?\n\nUsalo después de depositar o retirar fondos en Bitso. ' +
-      'Los resultados "Hoy", "Desde el inicio" y el gráfico se empiezan a medir desde el saldo actual.');
+async function startBot() { await apiPost('/api/eth/bot/start', null, 'Bot encendido'); refresh(); }
+async function stopBot() {
+  const ok = await confirmDialog({
+    title: '¿Detener el bot?',
+    text: 'No va a comprar ni vender hasta que lo vuelvas a encender.\nTus saldos en Bitso no cambian.',
+    confirm: 'Detener', danger: true,
+  });
   if (!ok) return;
-  await apiPost('/api/eth/baseline/reset', null, 'Punto de partida reiniciado');
-  refreshAll();
+  await apiPost('/api/eth/bot/stop', null, 'Bot detenido');
+  refresh();
 }
-async function onModeToggle() {
-  const wantsLive = document.getElementById('modeToggle').checked;
-  if (wantsLive) {
-    const ok = confirm('⚠ ATENCIÓN: vas a activar el modo LIVE.\n\nEl bot ejecutará ÓRDENES REALES de ETH en el exchange con dinero real.\n\n¿Confirmás el cambio a LIVE?');
-    if (!ok) { document.getElementById('modeToggle').checked = false; return; }
+async function runTick() {
+  const b = $('btnTick');
+  b.disabled = true;
+  b.innerHTML = icon('refresh', 'ic-sm spin') + ' Chequeando…';
+  try {
+    const d = await (await fetch('/api/eth/tick', { method: 'POST' })).json();
+    if (d.ok) toast('Chequeo listo: ' + d.action); else toast('Error en el chequeo', false);
+  } catch (e) {
+    toast('Error de red', false);
+  } finally {
+    b.disabled = false;
+    b.innerHTML = icon('refresh', 'ic-sm') + ' Chequear ahora';
+    refresh();
   }
-  const body = new FormData(); body.append('dry_run', wantsLive ? 'false' : 'true');
-  const d = await apiPost('/api/eth/mode', body, wantsLive ? 'Modo LIVE activado' : 'Modo SIMULADOR activado');
-  if (d && d.ok !== false) { currentDryRun = d.dry_run; syncModeUI(); setTimeout(() => location.reload(), 800); }
 }
 
 // ── Refresco ────────────────────────────────────────────────────────────
-async function refreshAll() {
-  const [status, grid, trades, perf] = await Promise.all(
-    ['/api/eth/status', '/api/eth/grid', '/api/eth/trades', '/api/eth/performance']
-      .map(u => getJson(u).catch(() => null)));
-  if (status) S.status = status;
+function render() { renderKpis(); renderControl(); renderGrid(); renderRecent(); }
+
+async function refresh() {
+  const [, grid, trades, perf] = await Promise.all([
+    Shell.load(),
+    ...['/api/eth/grid', '/api/eth/trades', '/api/eth/performance'].map(u => getJson(u).catch(() => null)),
+  ]);
   if (grid) S.grid = grid;
   if (trades) S.trades = trades;
   if (perf) S.perf = perf;
-  renderStatus(); renderDoing(); renderPerf(); renderTrades(); renderGrid();
+  render();
   loadChart();
   // Los saldos vienen de Bitso (más lento): se completan cuando llegan
   getJson('/api/eth/balances').then(b => {
-    S.bal = b; renderStatus(); renderDoing(); renderPortfolio(); renderGrid();
+    S.bal = b;
+    if (b.ok && b.price) Shell.setPrice(b.price, true);
+    render();
   }).catch(() => {});
 }
-refreshAll();
-setInterval(refreshAll, REFRESH_MS);
+every(refresh);
 </script>
 {% endblock %}

@@ -6,7 +6,6 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -15,12 +14,16 @@ from sqlalchemy import desc
 
 from app import config
 from app.database import db_session, get_setting, set_setting
-from app.models import Auth, EthBotState, EthCandle, EthTrade
+from app.models import Auth, EthBotState, EthTrade
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Versión de los assets estáticos (cambia con cada build) para que el navegador no use CSS/JS viejos
+_STATIC_DIR = Path(__file__).parent / "static"
+ASSET_VERSION = str(int(max((p.stat().st_mtime for p in _STATIC_DIR.rglob("*") if p.is_file()), default=0)))
 
 
 def _localtime(dt):
@@ -49,20 +52,23 @@ def _bool_setting(db, key: str, default: bool) -> bool:
 
 
 def _base_ctx(request: Request, db) -> dict:
-    from app.scheduler import get_next_tick_time
-    next_tick = get_next_tick_time()
-    exchange_source = get_setting(db, "exchange_client", config.EXCHANGE_CLIENT)
     return {
         "request": request,
         "bot_version": config.BOT_VERSION,
         "bot_status": get_setting(db, "bot_status", config.BOT_STATUS),
         "dry_run": _bool_setting(db, "dry_run", config.DRY_RUN),
         "username": getattr(request.state, "username", ""),
-        "next_tick": next_tick.strftime("%d/%m/%Y %H:%M") if next_tick else "—",
-        "exchange_source": exchange_source,
-        "is_mock": exchange_source == "mock",
         "trading_pair": get_setting(db, "trading_pair", config.TRADING_PAIR),
+        "auto_refresh_seconds": config.DASHBOARD_AUTO_REFRESH_SECONDS,
+        "asset_v": ASSET_VERSION,
     }
+
+
+def _page(request: Request, template: str, **extra) -> HTMLResponse:
+    with db_session() as db:
+        ctx = _base_ctx(request, db)
+    ctx.update(extra)
+    return templates.TemplateResponse(template, ctx)
 
 
 def _trade_net(t) -> tuple[float, float, bool]:
@@ -98,7 +104,7 @@ def _baseline(db, dry_run: bool) -> dict | None:
     return b
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# ── Páginas ───────────────────────────────────────────────────────────────────
 
 @router.get("/")
 async def index():
@@ -107,20 +113,27 @@ async def index():
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    with db_session() as db:
-        ctx = _base_ctx(request, db)
-        dry_flag = 1 if ctx["dry_run"] else 0
-        last_state = db.query(EthBotState).filter(
-            EthBotState.dry_run == dry_flag
-        ).order_by(desc(EthBotState.timestamp)).first()
-        ctx.update({
-            "state": last_state,
-            "capital_initial": float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD))),
-            "levels": int(get_setting(db, "levels", str(config.ETH_GRID_LEVELS))),
-            "range_pct": float(get_setting(db, "range_pct", str(config.ETH_GRID_RANGE_PCT))),
-            "auto_refresh_seconds": config.DASHBOARD_AUTO_REFRESH_SECONDS,
-        })
-    return templates.TemplateResponse("eth_dashboard.html", ctx)
+    return _page(request, "eth_dashboard.html", adx_threshold=config.ADX_THRESHOLD)
+
+
+@router.get("/rendimiento", response_class=HTMLResponse)
+async def performance_page(request: Request):
+    return _page(request, "performance.html")
+
+
+@router.get("/operaciones", response_class=HTMLResponse)
+async def trades_page(request: Request):
+    return _page(request, "trades.html")
+
+
+@router.get("/modo", response_class=HTMLResponse)
+async def mode_page(request: Request):
+    return _page(request, "mode.html")
+
+
+@router.get("/ayuda", response_class=HTMLResponse)
+async def help_page(request: Request):
+    return _page(request, "help.html", adx_threshold=config.ADX_THRESHOLD)
 
 
 # ── API: status ───────────────────────────────────────────────────────────────
@@ -134,31 +147,16 @@ async def api_status(request: Request):
         state = db.query(EthBotState).filter(
             EthBotState.dry_run == dry_flag
         ).order_by(desc(EthBotState.timestamp)).first()
-        capital_initial = float(get_setting(db, "capital", str(config.ETH_CAPITAL_USD)))
         from app.scheduler import get_next_tick_time
         next_tick = get_next_tick_time()
-        next_tick = next_tick.isoformat() if next_tick else None
-        if not state:
-            return JSONResponse({
-                "regime": None, "adx": None, "price": None,
-                "capital": capital_initial, "capital_initial": capital_initial,
-                "daily_pnl": 0.0, "total_pnl": 0.0, "drawdown_pct": 0.0,
-                "bot_status": bot_status, "dry_run": dry_run, "updated_at": None,
-                "next_tick": next_tick,
-            })
         return JSONResponse({
-            "regime": state.regime,
-            "adx": round(state.adx_value, 2) if state.adx_value is not None else None,
-            "price": state.current_price,
-            "capital": state.capital,
-            "capital_initial": capital_initial,
-            "daily_pnl": state.daily_pnl,
-            "total_pnl": state.total_pnl,
-            "drawdown_pct": state.drawdown_pct,
+            "regime": state.regime if state else None,
+            "adx": round(state.adx_value, 2) if state and state.adx_value is not None else None,
+            "price": state.current_price if state else None,
             "bot_status": bot_status,
             "dry_run": dry_run,
-            "updated_at": _localtime(state.timestamp).isoformat() if state.timestamp else None,
-            "next_tick": next_tick,
+            "updated_at": _localtime(state.timestamp).isoformat() if state and state.timestamp else None,
+            "next_tick": next_tick.isoformat() if next_tick else None,
         })
 
 
@@ -178,11 +176,11 @@ async def api_trades(request: Request):
                 "ts_iso": t.timestamp.replace(tzinfo=timezone.utc).isoformat() if t.timestamp else None,
                 "side": t.side, "price": t.price,
                 "amount_eth": t.amount_eth, "amount_usd": t.amount_usd,
-                "pnl": t.pnl, "fee": round(fee, 6), "net": round(net, 6),
+                "fee": round(fee, 6), "net": round(net, 6),
                 "fee_estimated": estimated, "fee_amount": t.fee_amount, "fee_currency": t.fee_currency,
-                "strategy": t.strategy, "status": t.status,
+                "strategy": t.strategy,
             })
-    return JSONResponse({"trades": trades, "count": len(trades)})
+    return JSONResponse({"trades": trades})
 
 
 # ── API: rendimiento (hoy / día a día / histórico) ────────────────────────────
@@ -312,26 +310,6 @@ async def api_grid(request: Request):
         return JSONResponse(grid)
 
 
-# ── API: candles ──────────────────────────────────────────────────────────────
-
-@router.get("/api/eth/candles")
-async def api_candles(request: Request):
-    with db_session() as db:
-        rows = (
-            db.query(EthCandle)
-            .order_by(desc(EthCandle.timestamp))
-            .limit(100)
-            .all()
-        )
-        rows = list(reversed(rows))
-        candles = [{
-            "timestamp": c.timestamp.isoformat() if c.timestamp else "",
-            "open": c.open, "high": c.high, "low": c.low,
-            "close": c.close, "volume": c.volume,
-        } for c in rows]
-    return JSONResponse({"candles": candles, "count": len(candles)})
-
-
 # ── API: historial de capital (para el gráfico) ───────────────────────────────
 
 @router.get("/api/eth/history")
@@ -361,7 +339,7 @@ async def api_history(request: Request, days: int = 1):
         "capital": cap, "price": price,
         "hold": round(base["usdt"] + base["eth"] * (price or 0), 4),
     } for ts, cap, price in sampled if cap is not None]
-    return JSONResponse({"points": points, "start_value": base["value"]})
+    return JSONResponse({"points": points})
 
 
 # ── API: start / stop ─────────────────────────────────────────────────────────
@@ -382,24 +360,6 @@ async def api_stop(request: Request):
     return JSONResponse({"ok": True, "status": "off"})
 
 
-# ── API: config ───────────────────────────────────────────────────────────────
-
-@router.post("/api/eth/config")
-async def api_config(
-    request: Request,
-    capital: float = Form(...),
-    levels: int = Form(...),
-    range_pct: float = Form(...),
-):
-    with db_session() as db:
-        set_setting(db, "capital", str(capital))
-        set_setting(db, "levels", str(levels))
-        set_setting(db, "range_pct", str(range_pct))
-    logger.info("[WEB] Config ETH guardada: capital=%.2f levels=%d range_pct=%.4f",
-                capital, levels, range_pct)
-    return JSONResponse({"ok": True, "capital": capital, "levels": levels, "range_pct": range_pct})
-
-
 # ── API: modo simulador / live ────────────────────────────────────────────────
 
 @router.post("/api/eth/mode")
@@ -412,7 +372,7 @@ async def api_mode(request: Request, dry_run: str = Form(...)):
     return JSONResponse({"ok": True, "dry_run": new_val == "true"})
 
 
-# ── API: correr un tick manual ────────────────────────────────────────────────
+# ── API: saldos del exchange ──────────────────────────────────────────────────
 
 @router.get("/api/eth/balances")
 async def api_balances(request: Request):
@@ -423,7 +383,6 @@ async def api_balances(request: Request):
 
         with db_session() as db:
             pair = get_setting(db, "trading_pair", config.TRADING_PAIR)
-            dry_run = _bool_setting(db, "dry_run", config.DRY_RUN)
 
         balances = client.get_balances()
         ticker = client.get_ticker(pair)
@@ -449,23 +408,20 @@ async def api_balances(request: Request):
 
         return JSONResponse({
             "ok": True,
-            "dry_run": dry_run,
-            "exchange": type(client).__name__,
             "eth_available": round(eth_available, 8),
-            "eth_locked": round(eth_locked, 8),
             "eth_total": round(eth_total, 8),
             "eth_value_usd": round(eth_value_usd, 2),
             "usdt_available": round(usdt_available, 2),
-            "usdt_locked": round(usdt_locked, 2),
             "usdt_total": round(usdt_available + usdt_locked, 2),
             "portfolio_usd": round(portfolio_usd, 2),
             "price": price,
-            "pair": pair,
         })
     except Exception as exc:
         logger.exception("[WEB] Error obteniendo balances: %s", exc)
         return JSONResponse({"ok": False, "error": str(exc)})
 
+
+# ── API: correr un tick manual ────────────────────────────────────────────────
 
 @router.post("/api/eth/tick")
 def api_tick(request: Request):
