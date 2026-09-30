@@ -227,13 +227,17 @@ function renderGrid() {
     setText('nbPrice', '—'); setText('nbSub', 'Sin niveles de compra pendientes');
   }
   if (nextSell !== null && price) {
-    const pct = signedPct((nextSell - price) / price * 100);
-    setText('nsPrice', usd(nextSell));
+    // El bot no vende bajo el costo promedio + comisiones: si el piso supera al nivel, manda el piso
+    const floored = g.sell_floor && g.sell_floor > nextSell;
+    const target = floored ? g.sell_floor : nextSell;
+    const pct = signedPct((target - price) / price * 100);
+    setText('nsPrice', usd(target));
     if (sz.eth !== null && sz.eth < 1e-6) {
       setText('nsSub', `${pct} · sin ETH: primero tiene que comprar`);
     } else {
-      const eth = sz.sellEth !== null ? sz.sellEth : (sz.per || 0) / nextSell;
-      setText('nsSub', `${pct} · vende ≈ ${nf(eth, 5)} ETH (${usd(eth * nextSell)})`);
+      const eth = sz.sellEth !== null ? sz.sellEth : (sz.per || 0) / target;
+      setText('nsSub', `${pct} · vende ≈ ${nf(eth, 5)} ETH (${usd(eth * target)})` +
+        (floored ? ' · piso: costo + comisiones' : ''));
     }
   } else {
     setText('nsPrice', '—'); setText('nsSub', 'Sin niveles de venta pendientes');

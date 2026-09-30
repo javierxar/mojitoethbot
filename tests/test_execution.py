@@ -150,6 +150,23 @@ def test_recenter_floor_counts_buy_fee_once(db):
     assert ex.orders == [("buy", 10.0)]   # por debajo del piso no vende
 
 
+
+def test_grid_never_sells_below_average_cost(db):
+    # Compra a 2000 (costo con comisión ≈ 2007,2): el nivel 2005 no alcanza para cubrir costo + comisiones
+    ex = FakeBitso(usdt=10.0, price=2000.0)
+    r._place_buy(db, ex, 10.0, 2000.0, "grid", dry_run=False)
+    _, cost = r._inventory_and_cost(db, dry_run=False)
+    floor = cost * (1 + config.GRID_MIN_MARGIN_PCT) / (1 - FEE)
+    _store_grid(db, {"buy_levels": [1950.0], "sell_levels": [2005.0], "grid_step": 25.0, "amount_per_level": 10})
+    ex.orders.clear()
+    ex.price = 2010.0
+    grid = r._execute(db, _grid_decision(2010.0), ex, dry_run=False)
+    assert ex.orders == [] and 2005.0 in grid["sell_levels"]      # nivel alcanzado pero bajo el piso
+    ex.price = round(floor + 1, 2)
+    r._execute(db, _grid_decision(ex.price), ex, dry_run=False)
+    assert [side for side, _ in ex.orders] == ["sell"]
+    assert db.query(EthTrade).filter(EthTrade.side == "sell").one().pnl > 0
+
 # ── Entrada inicial: solo la primera vez ──────────────────────────────────────
 
 def test_first_entry_buys_at_market_when_bot_never_traded(db):

@@ -161,6 +161,7 @@ def get_settings_dict() -> dict:
         "grid_range_min_pct": GRID_RANGE_MIN_PCT,
         "grid_range_max_pct": GRID_RANGE_MAX_PCT,
         "profit_take_cooldown_hours": PROFIT_TAKE_COOLDOWN_HOURS,
+        "grid_min_margin_pct": GRID_MIN_MARGIN_PCT,
         "dry_run": DRY_RUN,
         "trading_pair": TRADING_PAIR,
     }

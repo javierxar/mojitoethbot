@@ -379,12 +379,20 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
         inv, avg_cost = _inventory_and_cost(db, dry_run)
 
     # --- VENTAS ---
+    # Nunca vender bajo el costo promedio + comisiones + margen: el nivel queda pendiente
+    # hasta que el precio supere también ese piso.
+    sell_floor = (min_sell_price(avg_cost, config.GRID_MIN_MARGIN_PCT, buy_fee=0.0)
+                  if inv > 0 and avg_cost > 0 else 0.0)
     n_sell_pending = len(sell_levels)
     for level in sorted(sell_levels):
         if eth_available <= 1e-8:
             break
         eth_per_level = eth_available / max(1, n_sell_pending)
         eth_to_sell = floor_decimals(min(eth_per_level, eth_available), 8)
+        if current_price >= level and current_price < sell_floor:
+            logger.info("[ETH] Grid: nivel de venta %.2f alcanzado pero bajo el piso %.2f (costo + comisiones)",
+                        level, sell_floor)
+            break
         if current_price >= level and eth_to_sell > 1e-8:
             try:
                 fill = _place_sell(db, executor, eth_to_sell, current_price, avg_cost, "grid", dry_run)

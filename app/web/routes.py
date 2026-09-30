@@ -307,6 +307,12 @@ async def api_grid(request: Request):
                                  "current_price": state.current_price if state else None})
         grid = json.loads(state.active_grid_levels)
         grid["current_price"] = state.current_price
+        # Piso de venta de la grilla: costo promedio + comisiones + margen (el bot no vende debajo)
+        from app.eth_runner import _inventory_and_cost
+        from app.trading_math import min_sell_price
+        inv, avg_cost = _inventory_and_cost(db, dry_run)
+        grid["sell_floor"] = (round(min_sell_price(avg_cost, config.GRID_MIN_MARGIN_PCT, buy_fee=0.0), 2)
+                              if inv > 0 and avg_cost > 0 else None)
         return JSONResponse(grid)
 
 

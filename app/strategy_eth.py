@@ -7,6 +7,9 @@ Mejoras sobre v1:
   - Profit-taking: vende parte del inventario cuando la ganancia no realizada
     supera un umbral configurable.
   - Inventario máximo: limita la acumulación de posiciones.
+  - Rupturas confirmadas: dirección (+DI/−DI), EMA-50 y dos velas cerradas fuera del canal.
+    Una venta por ruptura nunca queda bajo costo + comisiones, salvo tendencia bajista
+    confirmada y precio en el stop-loss.
 
 Regímenes (según ADX):
   - ADX < 25  → "grid": mercado lateral, grilla adaptativa.
@@ -19,6 +22,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+
+from app.trading_math import min_sell_price
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +90,13 @@ class EthStrategyEngine:
     # ── ADX (Wilder) ─────────────────────────────────────────────────────────
 
     def calculate_adx(self, highs, lows, closes, period: int = 14) -> float:
+        return self.calculate_adx_di(highs, lows, closes, period)[0]
+
+    def calculate_adx_di(self, highs, lows, closes, period: int = 14) -> tuple[float, float, float]:
+        """(ADX, +DI, −DI). El ADX mide la fuerza de la tendencia; +DI/−DI su dirección."""
         n = len(closes)
         if n < 2 * period + 1 or len(highs) != n or len(lows) != n:
-            return 0.0
+            return 0.0, 0.0, 0.0
 
         trs: list[float] = []
         plus_dm: list[float] = []
@@ -128,13 +137,16 @@ class EthStrategyEngine:
             sm_minus = sm_minus - (sm_minus / period) + minus_dm[i]
             dxs.append(_dx(atr, sm_plus, sm_minus))
 
+        plus_di = round(100.0 * sm_plus / atr, 4) if atr else 0.0
+        minus_di = round(100.0 * sm_minus / atr, 4) if atr else 0.0
+
         if len(dxs) < period:
-            return round(sum(dxs) / len(dxs), 4) if dxs else 0.0
+            return (round(sum(dxs) / len(dxs), 4) if dxs else 0.0), plus_di, minus_di
 
         adx = sum(dxs[:period]) / period
         for i in range(period, len(dxs)):
             adx = (adx * (period - 1) + dxs[i]) / period
-        return round(adx, 4)
+        return round(adx, 4), plus_di, minus_di
 
     # ── Donchian ─────────────────────────────────────────────────────────────
 
@@ -218,6 +230,43 @@ class EthStrategyEngine:
             "take_profit": None,
         }
 
+    def confirm_breakout(self, action: str, highs, lows, closes, current_price: float, ema50: float,
+                         plus_di: float, minus_di: float, avg_cost: float, donchian_period: int = 20,
+                         stop_loss_pct: float = 0.02, min_margin_pct: float = 0.002) -> tuple[bool, str]:
+        """
+        Filtra rupturas falsas. La última vela está en curso, así que la confirmación usa las dos
+        últimas velas CERRADAS contra el canal Donchian previo a ellas.
+        - Compra: +DI > −DI, precio sobre EMA-50 y dos cierres sobre el techo previo.
+        - Venta: siempre permitida si deja ganancia sobre costo + comisiones + margen. Con pérdida,
+          solo con tendencia bajista confirmada (−DI > +DI, precio bajo EMA-50, dos cierres bajo el
+          piso previo) y precio en el stop-loss (costo − stop_loss_pct).
+        """
+        if action == "sell":
+            floor = min_sell_price(avg_cost, min_margin_pct, buy_fee=0.0) if avg_cost > 0 else 0.0
+            if current_price >= floor:
+                return True, "venta con ganancia sobre costo + comisiones"
+
+        closed = closes[:-1]
+        prev = self.calculate_donchian(highs[:-3], lows[:-3], period=donchian_period)
+        if len(closed) < 2 or not prev["upper"]:
+            return False, "sin velas suficientes para confirmar"
+        if action == "buy":
+            if plus_di <= minus_di:
+                return False, "dirección no alcista (+DI ≤ −DI)"
+            if current_price <= ema50:
+                return False, "precio bajo EMA-50"
+            if not (closed[-1] > prev["upper"] and closed[-2] > prev["upper"]):
+                return False, "sin dos cierres sobre el techo"
+            return True, "ruptura alcista confirmada"
+
+        confirmed = (minus_di > plus_di and current_price < ema50
+                     and closed[-1] < prev["lower"] and closed[-2] < prev["lower"])
+        if not confirmed:
+            return False, f"bajo costo (piso ${floor:,.2f}) sin tendencia bajista confirmada"
+        if current_price > avg_cost * (1 - stop_loss_pct):
+            return False, f"bajo costo pero sin tocar el stop-loss ${avg_cost * (1 - stop_loss_pct):,.2f}"
+        return True, "stop-loss con tendencia bajista confirmada"
+
     # ── Método principal ─────────────────────────────────────────────────────
 
     def decide(self, candles: list[dict], capital: float, config: dict) -> Decision:
@@ -242,10 +291,11 @@ class EthStrategyEngine:
         inventory_eth = float(config.get("inventory_eth", 0.0))
         avg_cost = float(config.get("avg_cost", 0.0))
         base_capital = float(config.get("base_capital", capital))
+        min_margin = float(config.get("grid_min_margin_pct", 0.002))
 
         highs, lows, closes = _extract(candles)
         current_price = closes[-1] if closes else 0.0
-        adx = self.calculate_adx(highs, lows, closes, period=adx_period)
+        adx, plus_di, minus_di = self.calculate_adx_di(highs, lows, closes, period=adx_period)
         atr = self.calculate_atr(highs, lows, closes, period=adx_period)
         ema50 = self.calculate_ema(closes, period=50)
         regime = "breakout" if adx >= adx_threshold else "grid"
@@ -328,6 +378,14 @@ class EthStrategyEngine:
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
             action = signal["action"]
+            if action in ("buy", "sell"):
+                ok, why = self.confirm_breakout(
+                    action, highs, lows, closes, current_price, ema50, plus_di, minus_di, avg_cost,
+                    donchian_period=donchian_period, stop_loss_pct=stop_loss_pct, min_margin_pct=min_margin,
+                )
+                if not ok:
+                    logger.info("[STRATEGY] Ruptura %s descartada: %s", action, why)
+                    action = "hold"
 
             if action in ("buy", "sell"):
                 logger.info(

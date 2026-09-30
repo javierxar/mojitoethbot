@@ -308,3 +308,80 @@ def test_decide_returns_atr_and_ema():
     dec = eng.decide(_choppy_candles(), capital=100.0, config=_cfg())
     assert dec.atr >= 0.0
     assert dec.ema50 > 0.0
+
+
+# ── Rupturas confirmadas: nunca vender bajo costo sin tendencia bajista ──────
+
+def _downtrend_candles(n=80, start=3000.0, step=10.0):
+    """Serie fuertemente bajista; la última vela cierra en su mínimo (toca el piso Donchian)."""
+    candles = []
+    price = start
+    for _ in range(n):
+        o = price
+        c = price - step
+        candles.append(_candle(o, o + step * 0.1, c - step * 0.2, c))
+        price = c
+    last = candles[-1]
+    last["low"] = last["close"]
+    return candles
+
+
+def _confirm(eng, action, candles, avg_cost):
+    highs = [c["high"] for c in candles]
+    lows = [c["low"] for c in candles]
+    closes = [c["close"] for c in candles]
+    _, plus_di, minus_di = eng.calculate_adx_di(highs, lows, closes)
+    ema50 = eng.calculate_ema(closes, 50)
+    return eng.confirm_breakout(action, highs, lows, closes, closes[-1], ema50, plus_di, minus_di, avg_cost)
+
+
+def test_adx_di_gives_trend_direction():
+    eng = EthStrategyEngine()
+    for candles, up in ((_trending_candles(), True), (_downtrend_candles(), False)):
+        highs = [c["high"] for c in candles]
+        lows = [c["low"] for c in candles]
+        closes = [c["close"] for c in candles]
+        adx, plus_di, minus_di = eng.calculate_adx_di(highs, lows, closes)
+        assert adx == eng.calculate_adx(highs, lows, closes)
+        assert (plus_di > minus_di) is up
+
+
+def test_breakout_sell_with_profit_is_always_allowed():
+    eng = EthStrategyEngine()
+    candles = _trending_candles()                     # sin tendencia bajista, pero con ganancia
+    ok, _ = _confirm(eng, "sell", candles, avg_cost=candles[-1]["close"] * 0.9)
+    assert ok
+
+
+def test_breakout_sell_below_cost_needs_bearish_trend():
+    eng = EthStrategyEngine()
+    candles = _trending_candles()                     # tendencia alcista: +DI > −DI
+    ok, why = _confirm(eng, "sell", candles, avg_cost=candles[-1]["close"] * 1.05)
+    assert not ok and "sin tendencia bajista" in why
+
+
+def test_breakout_sell_below_cost_waits_for_stop_loss():
+    eng = EthStrategyEngine()
+    candles = _downtrend_candles()
+    price = candles[-1]["close"]
+    ok, why = _confirm(eng, "sell", candles, avg_cost=price * 1.01)      # −1%: todavía no tocó el stop de 2%
+    assert not ok and "stop-loss" in why
+    ok, _ = _confirm(eng, "sell", candles, avg_cost=price / 0.97)         # −3%: stop tocado con tendencia bajista
+    assert ok
+
+
+def test_breakout_buy_needs_confirmation():
+    eng = EthStrategyEngine()
+    assert _confirm(eng, "buy", _trending_candles(), avg_cost=0.0)[0]
+    ok, _ = _confirm(eng, "buy", _choppy_candles(), avg_cost=0.0)
+    assert not ok
+
+
+def test_decide_never_sells_below_cost_before_stop():
+    eng = EthStrategyEngine()
+    candles = _downtrend_candles()
+    price = candles[-1]["close"]
+    dec = eng.decide(candles, capital=100.0, config=_cfg(inventory_eth=0.01, avg_cost=price * 1.01))
+    assert dec.regime == "breakout" and dec.action != "sell"
+    dec = eng.decide(candles, capital=100.0, config=_cfg(inventory_eth=0.01, avg_cost=price / 0.97))
+    assert dec.action == "sell" and dec.strategy == "breakout"
