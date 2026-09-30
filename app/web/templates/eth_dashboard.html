@@ -219,10 +219,16 @@ function renderGrid() {
 
   if (nextBuy !== null && price) {
     const pct = signedPct((nextBuy - price) / price * 100);
+    const bal = S.bal && S.bal.ok ? S.bal : null;
+    // Límite de inventario: no compra si el ETH superaría ese % del portfolio
+    const capped = !isDryRun() && bal && g.inventory_cap && bal.portfolio_usd > 0
+      && (bal.eth_value_usd + sz.buyUsd) / bal.portfolio_usd > g.inventory_cap;
     setText('nbPrice', usd(nextBuy));
     setText('nbSub', sz.usdt !== null && sz.usdt < 1
       ? `${pct} · sin USDT libre: primero tiene que vender`
-      : `${pct} · compra ≈ ${usd(sz.buyUsd)}`);
+      : capped
+        ? `${pct} · en pausa: el ETH ya es el ${nf(bal.eth_value_usd / bal.portfolio_usd * 100, 0)}% del portfolio (límite ${nf(g.inventory_cap * 100, 0)}%)`
+        : `${pct} · compra ≈ ${usd(sz.buyUsd)}`);
   } else {
     setText('nbPrice', '—'); setText('nbSub', 'Sin niveles de compra pendientes');
   }

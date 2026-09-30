@@ -122,8 +122,9 @@ def test_unconfirmed_fill_is_estimated_with_configured_fees(db):
 
 # ── Redondeo: nunca pedir más que el saldo ────────────────────────────────────
 
-def test_grid_buy_never_exceeds_available_usdt(db):
+def test_grid_buy_never_exceeds_available_usdt(db, monkeypatch):
     # Con round() se pedían 5.42 teniendo 5.415 y Bitso rechazaba la orden en cada chequeo
+    monkeypatch.setattr(config, "MAX_INVENTORY_COST_PCT", 1.0)   # este test mide solo el redondeo
     _store_grid(db, {"buy_levels": [1990.0], "sell_levels": [2050.0], "grid_step": 25.0, "amount_per_level": 10})
     ex = FakeBitso(usdt=5.415, eth=0.001, price=1985.0)
     r._execute(db, _grid_decision(1985.0), ex, dry_run=False)
@@ -166,6 +167,28 @@ def test_grid_never_sells_below_average_cost(db):
     r._execute(db, _grid_decision(ex.price), ex, dry_run=False)
     assert [side for side, _ in ex.orders] == ["sell"]
     assert db.query(EthTrade).filter(EthTrade.side == "sell").one().pnl > 0
+
+
+def test_grid_buy_respects_inventory_cap(db, monkeypatch):
+    monkeypatch.setattr(config, "MAX_INVENTORY_COST_PCT", 0.80)
+    # ETH $5,26 + USDT $15 = $20,26: la primera compra ($7,50) deja 63% en ETH; la segunda llevaría a 100%
+    _store_grid(db, {"buy_levels": [2640.0, 2650.0], "sell_levels": [2750.0], "grid_step": 25.0, "amount_per_level": 10})
+    ex = FakeBitso(usdt=15.0, eth=0.002, price=2630.0)
+    r._execute(db, _grid_decision(2630.0), ex, dry_run=False)
+    assert ex.orders == [("buy", 7.5)]
+
+
+def test_grid_buy_paused_when_eth_already_at_cap(db, monkeypatch):
+    monkeypatch.setattr(config, "MAX_INVENTORY_COST_PCT", 0.80)
+    # Situación real del 30/09: ~75% en ETH; comprar los $5,28 restantes dejaría 100% en ETH
+    grid = {"buy_levels": [2650.0], "sell_levels": [2750.0], "grid_step": 25.0, "amount_per_level": 10}
+    _store_grid(db, grid)
+    ex = FakeBitso(usdt=5.28, eth=0.00586, price=2640.0)
+    r._execute(db, _grid_decision(2640.0), ex, dry_run=False)
+    assert ex.orders == []
+    monkeypatch.setattr(config, "MAX_INVENTORY_COST_PCT", 1.0)      # sin límite, la misma compra se hace
+    r._execute(db, _grid_decision(2640.0), ex, dry_run=False)
+    assert ex.orders == [("buy", 5.28)]
 
 # ── Entrada inicial: solo la primera vez ──────────────────────────────────────
 

@@ -88,7 +88,7 @@ GRID_BELOW_RATIO: float = _get_float("GRID_BELOW_RATIO", 0.60)
 # Profit-taking: vender parte del inventario cuando ganancia no realizada > umbral
 PROFIT_TAKE_THRESHOLD_PCT: float = _get_float("PROFIT_TAKE_THRESHOLD_PCT", 0.15)
 PROFIT_TAKE_SELL_RATIO: float = _get_float("PROFIT_TAKE_SELL_RATIO", 0.20)
-# Inventario máximo como fracción del capital (al costo)
+# Inventario máximo: el ETH (a precio actual) nunca supera esta fracción del portfolio en compras del grid
 MAX_INVENTORY_COST_PCT: float = _get_float("MAX_INVENTORY_COST_PCT", 0.80)
 # Grid dinámico basado en ATR: range = ATR/precio * multiplicador, acotado
 GRID_ATR_MULTIPLIER: float = _get_float("GRID_ATR_MULTIPLIER", 3.0)

@@ -354,6 +354,10 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
         except Exception as exc:
             logger.error("[ETH] Error compra grid inicial: %s", exc)
     else:
+        # Límite de inventario: el ETH nunca supera MAX_INVENTORY_COST_PCT del portfolio (a precio actual),
+        # así siempre queda una reserva en USDT para seguir comprando si la caída continúa.
+        eth_value = eth_available * current_price
+        portfolio = usdt_available + eth_value
         # Solo se compra si el precio ACTUAL está en/bajo el nivel: comprar por una mecha
         # ya pasada ejecuta más arriba del nivel y el recíproco no cubre las fees.
         for level in sorted(buy_levels, reverse=True):
@@ -363,6 +367,11 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
                 spend = floor_decimals(min(spend_per_level, usdt_available), 2)
                 if spend < _MIN_ORDER_USD:
                     break
+                if portfolio > 0 and (eth_value + spend) / portfolio > config.MAX_INVENTORY_COST_PCT:
+                    logger.info("[ETH] Grid: compra en %.2f omitida — el ETH superaría el %.0f%% del portfolio",
+                                level, config.MAX_INVENTORY_COST_PCT * 100)
+                    break
+                eth_value += spend
                 try:
                     fill = _place_buy(db, executor, spend, current_price, "grid", dry_run)
                     usdt_available -= fill["usdt"]

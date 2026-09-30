@@ -313,6 +313,7 @@ async def api_grid(request: Request):
         inv, avg_cost = _inventory_and_cost(db, dry_run)
         grid["sell_floor"] = (round(min_sell_price(avg_cost, config.GRID_MIN_MARGIN_PCT, buy_fee=0.0), 2)
                               if inv > 0 and avg_cost > 0 else None)
+        grid["inventory_cap"] = config.MAX_INVENTORY_COST_PCT
         return JSONResponse(grid)
 
 
