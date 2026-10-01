@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app import config
@@ -72,8 +73,23 @@ def _run_eth_job() -> None:
         logger.info("[SCHEDULER] Tick ETH: %s", result)
     except Exception as exc:
         logger.exception("[SCHEDULER] Error en tick ETH: %s", exc)
+        try:
+            from app.notifications import notify
+            with db_session() as db:
+                notify(db, "tick_error", "ETH Bot · Error en el chequeo", [("Error", str(exc)[:300])],
+                       "El bot vuelve a intentar en el próximo chequeo.", throttle_key="tick_error")
+        except Exception:
+            logger.exception("[SCHEDULER] No se pudo avisar el error por mail")
     finally:
         release_lock()
+
+
+def _run_daily_summary() -> None:
+    try:
+        from app.eth_runner import send_daily_summary
+        send_daily_summary()
+    except Exception as exc:
+        logger.exception("[SCHEDULER] Error en resumen diario: %s", exc)
 
 
 # ── Inicio / parada ──────────────────────────────────────────────────────────
@@ -98,6 +114,15 @@ def start_scheduler() -> None:
         replace_existing=True,
         misfire_grace_time=120,
         next_run_time=datetime.now(tz),
+    )
+    hour, minute = (int(x) for x in config.NOTIFY_DAILY_TIME.split(":"))
+    _scheduler.add_job(
+        _run_daily_summary,
+        trigger=CronTrigger(hour=hour, minute=minute, timezone=config.TIMEZONE),
+        id="eth_daily_summary",
+        name="Resumen diario por mail",
+        replace_existing=True,
+        misfire_grace_time=600,
     )
     _scheduler.start()
     logger.info("[SCHEDULER] Iniciado — tick ETH cada %d min (%s), primer tick inmediato", interval, config.TIMEZONE)

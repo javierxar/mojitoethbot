@@ -125,6 +125,17 @@ WEB_USER: str = _get("WEB_USER", "Admin")
 WEB_PASSWORD: str = _get("WEB_PASSWORD", "123456")
 SESSION_SECRET: str = _get("SESSION_SECRET", "dev-secret-change-me-eth")
 
+# ─── Notificaciones por mail (Gmail SMTP) ────────────────────────────────────
+# Cuenta, contraseña de aplicación y destino se cargan desde la pestaña Notificaciones (DB);
+# estas variables son solo el valor inicial si la DB no tiene nada.
+SMTP_HOST: str = _get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT: int = _get_int("SMTP_PORT", 587)
+SMTP_USER: str = _get("SMTP_USER", "")
+SMTP_PASSWORD: str = _get("SMTP_PASSWORD", "")
+NOTIFY_EMAIL: str = _get("NOTIFY_EMAIL", "")
+# Hora local del resumen diario por mail (HH:MM)
+NOTIFY_DAILY_TIME: str = _get("NOTIFY_DAILY_TIME", "23:55")
+
 # ─── Dashboard ───────────────────────────────────────────────────────────────
 DASHBOARD_AUTO_REFRESH_SECONDS: int = _get_int("DASHBOARD_AUTO_REFRESH_SECONDS", 30)
 

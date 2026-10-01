@@ -351,10 +351,17 @@ async def api_history(request: Request, days: int = 1):
 
 # ── API: start / stop ─────────────────────────────────────────────────────────
 
+def _notify_change(db, request: Request, event: str, subject: str, state: str, note: str = "") -> None:
+    from app.notifications import notify
+    who = getattr(request.state, "username", "") or "panel web"
+    notify(db, event, subject, [("Nuevo estado", state), ("Cambiado por", who)], note)
+
+
 @router.post("/api/eth/bot/start")
 async def api_start(request: Request):
     with db_session() as db:
         set_setting(db, "bot_status", "on")
+        _notify_change(db, request, "bot_status", "ETH Bot · Encendido", "Encendido")
     logger.info("[WEB] Bot ETH → ON")
     return JSONResponse({"ok": True, "status": "on"})
 
@@ -363,6 +370,8 @@ async def api_start(request: Request):
 async def api_stop(request: Request):
     with db_session() as db:
         set_setting(db, "bot_status", "off")
+        _notify_change(db, request, "bot_status", "ETH Bot · Apagado", "Apagado",
+                       "No compra ni vende hasta que lo vuelvas a encender. Tus saldos en Bitso no cambian.")
     logger.info("[WEB] Bot ETH → OFF")
     return JSONResponse({"ok": True, "status": "off"})
 
@@ -375,6 +384,10 @@ async def api_mode(request: Request, dry_run: str = Form(...)):
     new_val = "true" if dry_run.strip().lower() in ("true", "1", "yes", "on") else "false"
     with db_session() as db:
         set_setting(db, "dry_run", new_val)
+        live = new_val == "false"
+        _notify_change(db, request, "mode", f"ETH Bot · Modo {'LIVE' if live else 'SIMULADOR'}",
+                       "LIVE · dinero real" if live else "Simulador",
+                       "El bot ejecuta órdenes reales en Bitso." if live else "El bot deja de operar con dinero real.")
     logger.warning("[WEB] Modo de operación ETH → %s", "SIMULADOR" if new_val == "true" else "LIVE")
     return JSONResponse({"ok": True, "dry_run": new_val == "true"})
 
@@ -516,6 +529,47 @@ async def api_exchange_test(request: Request):
     except Exception as exc:
         logger.exception("[WEB] Error en test de exchange: %s", exc)
         return JSONResponse({"ok": False, "error": str(exc)})
+
+
+# ── Notificaciones ───────────────────────────────────────────────────────────
+
+@router.get("/notificaciones", response_class=HTMLResponse)
+async def notifications_page(request: Request):
+    from app import notifications as nt
+    with db_session() as db:
+        cfg = nt.get_smtp_config(db)
+        extra = {
+            "smtp_user": cfg["user"], "notify_email": cfg["to"], "smtp_password_set": bool(cfg["password"]),
+            "smtp_server": f"{cfg['host']}:{cfg['port']}", "configured": nt.is_configured(cfg),
+            "toggles": [(k, label, nt.toggle_enabled(db, k)) for k, label in nt.TOGGLES.items()],
+            "daily_time": config.NOTIFY_DAILY_TIME, "last_test": nt.last_test(),
+        }
+    return _page(request, "notifications.html", **extra)
+
+
+@router.post("/api/eth/notifications")
+async def api_notifications_save(request: Request):
+    from app.notifications import TOGGLES
+    form = await request.form()
+    smtp_user = (form.get("smtp_user") or "").strip()
+    notify_email = (form.get("notify_email") or "").strip()
+    smtp_password = (form.get("smtp_password") or "").replace(" ", "").strip()
+    with db_session() as db:
+        set_setting(db, "smtp_user", smtp_user)
+        set_setting(db, "notify_email", notify_email)
+        if smtp_password:                       # vacío = conservar la contraseña guardada
+            set_setting(db, "smtp_password", smtp_password)
+        for key in TOGGLES:
+            set_setting(db, key, "true" if form.get(key) == "on" else "false")
+    logger.info("[WEB] Notificaciones guardadas: desde=%s hacia=%s", smtp_user, notify_email)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/eth/notifications/test")
+def api_notifications_test(request: Request):
+    from app.notifications import send_test
+    with db_session() as db:
+        return JSONResponse(send_test(db))
 
 
 # ── Change Password ──────────────────────────────────────────────────────────

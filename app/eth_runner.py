@@ -173,6 +173,49 @@ def _record_trade(db, side: str, fill: dict, pnl: float, strategy: str, dry_run:
     logger.info("[ETH] Trade %s registrado: %.8f ETH netos @ %.2f, $%.4f netos, fee $%.4f, pnl neto $%.4f (%s, %s)",
                 side, fill["eth"], fill["price"], fill["usdt"], fill["fee_usd"], pnl,
                 fill["status"], "SIM" if dry_run else "LIVE")
+    if not dry_run:
+        _notify_trade(db, side, fill, pnl, strategy)
+
+
+_STRATEGY_LABEL = {"grid": "grilla", "breakout": "ruptura", "profit_take": "toma de ganancia"}
+
+
+def _notify_trade(db, side: str, fill: dict, pnl: float, strategy: str) -> None:
+    from app.notifications import money, notify
+    if get_setting(db, "cap_notified") == "1":
+        set_setting(db, "cap_notified", "0")     # tras operar, el próximo freno por límite se vuelve a avisar
+    verb = "Compró" if side == "buy" else "Vendió"
+    subject = f"ETH Bot · {verb} {fill['eth']:.5f} ETH a ${money(fill['price'])}"
+    rows = [("Precio", f"${money(fill['price'])}"), ("ETH", f"{fill['eth']:.8f}"),
+            ("Monto", f"${money(fill['usdt'])}"), ("Comisión", f"${money(fill['fee_usd'], 4)}"),
+            ("Estrategia", _STRATEGY_LABEL.get(strategy, strategy))]
+    if side == "sell":
+        sign = "+" if pnl >= 0 else "−"
+        subject += f" ({sign}${money(abs(pnl), 3)})"
+        rows.append(("Resultado neto", f"{sign}${money(abs(pnl), 4)}"))
+    if fill["status"] != "completed":
+        rows.append(("Estado", "sin confirmar por Bitso (estimado)"))
+    notify(db, side, subject, rows)
+
+
+def _notify_cap(db, level: float, eth_value: float, portfolio: float) -> None:
+    from app.notifications import money, notify
+    set_setting(db, "cap_notified", "1")      # un aviso por pausa; se rearma al operar
+    pct = config.MAX_INVENTORY_COST_PCT * 100
+    notify(db, "cap", f"ETH Bot · Compras en pausa: ETH en {eth_value / portfolio * 100:.0f}% del portfolio", [
+        ("Nivel de compra alcanzado", f"${money(level)}"),
+        ("ETH en el portfolio", f"{eth_value / portfolio * 100:.1f}% (${money(eth_value)})"),
+        ("Límite", f"{pct:.0f}%"),
+    ], f"El bot no compra más hasta vender algo, para mantener una reserva en USDT. "
+       f"No hace falta hacer nada: se reanuda solo.")
+
+
+def _notify_order_error(db, what: str, exc: Exception, dry_run: bool) -> None:
+    if dry_run:
+        return
+    from app.notifications import notify
+    notify(db, "order_error", f"ETH Bot · Error en {what}", [("Operación", what), ("Error", str(exc)[:300])],
+           "El bot sigue funcionando y lo reintenta en el próximo chequeo.", throttle_key="order_error")
 
 
 def _place_buy(db, executor, usdt_amount: float, ref_price: float, strategy: str, dry_run: bool) -> dict:
@@ -211,6 +254,7 @@ def _execute(db, decision, executor, dry_run: bool) -> dict | None:
                 _place_sell(db, executor, qty, price, avg_cost, decision.strategy, dry_run)
         except Exception as exc:
             logger.exception("[ETH] Error en venta: %s", exc)
+            _notify_order_error(db, "una venta", exc, dry_run)
         return None
 
     if decision.action == "buy" and decision.amount_usd > 0:
@@ -221,6 +265,7 @@ def _execute(db, decision, executor, dry_run: bool) -> dict | None:
                 _place_buy(db, executor, spend, price, decision.strategy, dry_run)
         except Exception as exc:
             logger.exception("[ETH] Error en compra: %s", exc)
+            _notify_order_error(db, "una compra", exc, dry_run)
         return None
 
     if decision.action == "grid" and decision.grid:
@@ -353,6 +398,7 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
             logger.info("[ETH] Grid INICIAL: compra $%.2f @ %.2f", fill["usdt"], fill["price"])
         except Exception as exc:
             logger.error("[ETH] Error compra grid inicial: %s", exc)
+            _notify_order_error(db, "la compra inicial", exc, dry_run)
     else:
         # Límite de inventario: el ETH nunca supera MAX_INVENTORY_COST_PCT del portfolio (a precio actual),
         # así siempre queda una reserva en USDT para seguir comprando si la caída continúa.
@@ -370,6 +416,8 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
                 if portfolio > 0 and (eth_value + spend) / portfolio > config.MAX_INVENTORY_COST_PCT:
                     logger.info("[ETH] Grid: compra en %.2f omitida — el ETH superaría el %.0f%% del portfolio",
                                 level, config.MAX_INVENTORY_COST_PCT * 100)
+                    if not dry_run and get_setting(db, "cap_notified") != "1":
+                        _notify_cap(db, level, eth_value, portfolio)
                     break
                 eth_value += spend
                 try:
@@ -381,6 +429,7 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
                                 current_price, level, fill["usdt"], fill["price"])
                 except Exception as exc:
                     logger.error("[ETH] Error compra grid %.2f: %s", level, exc)
+                    _notify_order_error(db, f"una compra de la grilla (${level:,.2f})", exc, dry_run)
                     break
 
     if bought_count > 0:
@@ -412,6 +461,7 @@ def _execute_grid(db, decision, executor, pair: str, inv: float, avg_cost: float
                             current_price, level, fill["pnl"])
             except Exception as exc:
                 logger.error("[ETH] Error venta grid %.2f: %s", level, exc)
+                _notify_order_error(db, f"una venta de la grilla (${level:,.2f})", exc, dry_run)
                 break
 
     # --- Actualizar grid: remover fills, agregar recíprocos desde el precio real ---
@@ -480,6 +530,53 @@ def _usd_to_quote(client, pair: str, amount_usd: float) -> float:
         rate = config.MOCK_USDT_ARS_RATE
     return floor_decimals(amount_usd * rate, 2)
 
+
+
+# ── Resumen diario por mail ───────────────────────────────────────────────────
+
+def send_daily_summary() -> bool:
+    """Mail con el resultado del día local (se programa en el scheduler)."""
+    from zoneinfo import ZoneInfo
+
+    from app.notifications import money, notify
+
+    with db_session() as db:
+        dry_run = _is_dry_run(db)
+        flag = 1 if dry_run else 0
+        tz = ZoneInfo(config.TIMEZONE)
+        day_start = (datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+                     .astimezone(timezone.utc).replace(tzinfo=None))
+        states = (db.query(EthBotState).filter(EthBotState.dry_run == flag, EthBotState.timestamp >= day_start,
+                                               EthBotState.capital.isnot(None))
+                  .order_by(EthBotState.timestamp).all())
+        if not states:
+            return False
+        prev = (db.query(EthBotState.capital).filter(EthBotState.dry_run == flag, EthBotState.timestamp < day_start,
+                                                     EthBotState.capital.isnot(None))
+                .order_by(desc(EthBotState.timestamp)).first())
+        start_value = prev[0] if prev else states[0].capital
+        last = states[-1]
+        change = last.capital - start_value
+        trades = _mode_trades(db, dry_run).filter(EthTrade.timestamp >= day_start).all()
+        buys = sum(t.side == "buy" for t in trades)
+        sells = [t for t in trades if t.side == "sell"]
+        bot_net = sum(t.pnl or 0.0 for t in sells)
+        inv, avg_cost = _inventory_and_cost(db, dry_run)
+        eth_pct = inv * last.current_price / last.capital * 100 if last.capital else 0.0
+        sign = "+" if change >= 0 else "−"
+        rows = [
+            ("Modo", "SIMULADOR" if dry_run else "LIVE"),
+            ("Valor del portfolio", f"${money(last.capital)}"),
+            ("Variación del día", f"{sign}${money(abs(change), 3)} ({sign}{abs(change) / start_value * 100:.2f}%)"
+             if start_value else "—"),
+            ("Compras / ventas", f"{buys} / {len(sells)}"),
+            ("Ganancia neta del bot hoy", f"{'+' if bot_net >= 0 else '−'}${money(abs(bot_net), 3)}"),
+            ("Precio ETH", f"${money(last.current_price)}"),
+            ("ETH en el portfolio", f"{eth_pct:.0f}%" + (f" (costo promedio ${money(avg_cost)})" if inv else "")),
+        ]
+        note = ("La variación incluye la suba o baja del ETH que tenés en cartera; "
+                "la ganancia del bot es solo la de ventas cerradas.")
+        return notify(db, "daily", f"ETH Bot · Resumen del día: {sign}${money(abs(change), 2)}", rows, note)
 
 # ── Tick principal ────────────────────────────────────────────────────────────
 

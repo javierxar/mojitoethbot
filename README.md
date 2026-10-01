@@ -62,7 +62,16 @@ La matemática (ADX, Donchian) es pura y está cubierta por tests
 | POST   | `/api/eth/tick`             | corre un ciclo manual                         |
 
 Páginas del panel: `/dashboard` (Resumen), `/rendimiento`, `/operaciones`, `/modo`,
-`/exchange`, `/password`, `/ayuda`.
+`/notificaciones`, `/exchange`, `/password`, `/ayuda`.
+
+## Notificaciones por mail
+
+Desde **Configuración → Notificaciones** se carga la cuenta de Gmail que envía, su
+contraseña de aplicación (requiere verificación en 2 pasos; se crea en
+<https://myaccount.google.com/apppasswords>) y la dirección de destino. Avisa compras y
+ventas en LIVE, errores de órdenes o del chequeo (máximo uno por hora), encendido/apagado y
+cambios de modo, pausas por el límite de ETH y un resumen diario (`NOTIFY_DAILY_TIME`,
+23:55 por defecto). El envío corre en segundo plano: si Gmail falla, el bot sigue operando.
 
 ## Puesta en marcha
 

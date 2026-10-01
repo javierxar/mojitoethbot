@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Notificaciones{% endblock %}
+{% block page_title %}Notificaciones{% endblock %}
+{% block page_sub %}Avisos por mail de lo que hace el bot{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <div class="stat-strip">
+    <div>
+      <div class="label">Estado</div>
+      {% if configured %}
+        <span class="badge badge-green">{{ icon('check', 'ic-sm') }} Configurado</span>
+      {% else %}
+        <span class="badge badge-yellow">Sin configurar</span>
+      {% endif %}
+    </div>
+    <div>
+      <div class="label">Envía desde</div>
+      <b>{{ smtp_user or '—' }}</b>
+    </div>
+    <div>
+      <div class="label">Llega a</div>
+      <b>{{ notify_email or '—' }}</b>
+    </div>
+    <button class="btn btn-ghost" id="btnTest" onclick="sendTest()" style="margin-left:auto;" {{ '' if configured else 'disabled' }}>
+      {{ icon('mail', 'ic-sm') }} Enviar mail de prueba
+    </button>
+  </div>
+  <div id="testResult" class="note {{ 'info' if last_test.status == 'ok' else 'danger' }}" style="margin-top:1rem;"
+       {{ '' if last_test.status else 'hidden' }}>
+    {{ icon('info') }}
+    <div id="testText">
+      {% if last_test.status == 'ok' %}Último mail de prueba enviado a <strong>{{ last_test.recipient }}</strong>.
+      {% elif last_test.status %}<strong>No se pudo enviar.</strong> {{ last_test.error }}{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="grid cols-main mt">
+  <div class="card">
+    <div class="card-head"><div class="card-title">{{ icon('mail') }} Configuración</div></div>
+    <form id="notifyForm" onsubmit="saveNotify(event)">
+      <div class="field">
+        <label for="fldUser">Cuenta de Gmail que envía</label>
+        <input type="email" name="smtp_user" id="fldUser" value="{{ smtp_user }}" placeholder="tubot@gmail.com" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="fldPass">Contraseña de aplicación de Google</label>
+        <input type="password" name="smtp_password" id="fldPass" autocomplete="new-password"
+               placeholder="{{ '•••• •••• •••• ••••  (guardada — dejá vacío para no cambiarla)' if smtp_password_set else '16 caracteres, por ejemplo: abcd efgh ijkl mnop' }}">
+      </div>
+      <div class="field">
+        <label for="fldTo">Mandar los avisos a</label>
+        <div style="display:flex; gap:0.5rem;">
+          <input type="email" name="notify_email" id="fldTo" value="{{ notify_email }}" placeholder="vos@gmail.com">
+          <button type="button" class="btn btn-ghost" onclick="sameAddress()" title="Usar la misma cuenta que envía">Misma</button>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:1.4rem;">
+        <label>Qué avisar</label>
+        <div class="stack" style="gap:0.1rem;">
+          {% for key, label, on in toggles %}
+          <label class="check-row">
+            <input type="checkbox" name="{{ key }}" {{ 'checked' if on }}>
+            <span>{{ label }}{% if key == 'notify_daily' %} <span class="faint">(todos los días a las {{ daily_time }})</span>{% endif %}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">{{ icon('save', 'ic-sm') }} Guardar</button>
+    </form>
+  </div>
+
+  <div class="stack">
+    <div class="card faq">
+      <div class="card-head" style="margin-bottom:0.25rem;"><div class="card-title">{{ icon('help') }} Cómo configurar Gmail</div></div>
+      <ol class="steps">
+        <li><b>Elegí la cuenta que va a enviar.</b> Conviene una cuenta de Gmail aparte para el bot, así tu cuenta principal no queda expuesta.</li>
+        <li><b>Activá la verificación en 2 pasos</b> en esa cuenta:
+          <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener">myaccount.google.com → Seguridad → Verificación en 2 pasos</a>.
+          Google no deja crear contraseñas de aplicación sin esto.</li>
+        <li><b>Creá una contraseña de aplicación</b> en
+          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>:
+          escribí un nombre (por ejemplo "ETH Bot"), tocá <b>Crear</b> y copiá los 16 caracteres que aparecen.</li>
+        <li><b>Pegala acá</b> junto con la cuenta y la dirección de destino, y tocá <b>Guardar</b>. Los espacios no importan.</li>
+        <li><b>Tocá "Enviar mail de prueba".</b> Si no llega en un minuto, revisá Spam y marcalo como "No es spam".</li>
+      </ol>
+    </div>
+
+    <div class="note warn">
+      {{ icon('alert') }}
+      <div>
+        <strong>Si algo falla:</strong>
+        <ul style="padding-left:1rem; margin-top:0.35rem; display:flex; flex-direction:column; gap:0.3rem;">
+          <li><b>"Gmail rechazó la cuenta o la contraseña":</b> estás usando la contraseña normal de Gmail; tiene que ser la de aplicación.</li>
+          <li><b>No aparece la opción de contraseñas de aplicación:</b> falta la verificación en 2 pasos, o la cuenta es de trabajo/escuela, o tiene Protección Avanzada.</li>
+          <li>Podés revocar la contraseña cuando quieras desde la misma página de Google; el bot deja de enviar.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note info">
+      {{ icon('shield') }}
+      <div>La contraseña de aplicación se guarda en la base local del bot y nunca se muestra ni se escribe en los logs.
+        Solo sirve para enviar mails: no da acceso a tu cuenta de Bitso. Servidor: <b>{{ smtp_server }}</b>.</div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function sameAddress() {
+  const u = $('fldUser').value.trim();
+  if (!u) { toast('Completá primero la cuenta que envía', false); return; }
+  $('fldTo').value = u;
+}
+
+async function saveNotify(e) {
+  e.preventDefault();
+  const d = await apiPost('/api/eth/notifications', new FormData($('notifyForm')), 'Notificaciones guardadas');
+  if (d && d.ok !== false) setTimeout(() => location.reload(), 600);
+}
+
+async function sendTest() {
+  const b = $('btnTest');
+  b.disabled = true;
+  b.innerHTML = icon('refresh', 'ic-sm spin') + ' Enviando…';
+  try {
+    const d = await (await fetch('/api/eth/notifications/test', { method: 'POST' })).json();
+    const box = $('testResult');
+    box.hidden = false;
+    box.className = 'note ' + (d.ok ? 'info' : 'danger');
+    if (d.ok) {
+      $('testText').innerHTML = 'Mail de prueba enviado a <strong></strong>. Revisá tu bandeja (y Spam).';
+      $('testText').querySelector('strong').textContent = d.recipient;
+      toast('Mail de prueba enviado');
+    } else {
+      $('testText').innerHTML = '<strong>No se pudo enviar.</strong> <span></span>';
+      $('testText').querySelector('span').textContent = d.error || 'Error desconocido';
+      toast('No se pudo enviar el mail', false);
+    }
+  } catch (err) {
+    toast('Error de red', false);
+  } finally {
+    b.disabled = false;
+    b.innerHTML = icon('mail', 'ic-sm') + ' Enviar mail de prueba';
+  }
+}
+</script>
+{% endblock %}
