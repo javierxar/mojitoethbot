@@ -65,12 +65,29 @@
           {% for key, label, on in toggles %}
           <label class="check-row">
             <input type="checkbox" name="{{ key }}" {{ 'checked' if on }}>
-            <span>{{ label }}{% if key == 'notify_daily' %} <span class="faint">(todos los días a las {{ daily_time }})</span>{% endif %}</span>
+            <span>{{ label }}</span>
           </label>
+          {% if key == 'notify_daily' %}
+          <div class="summary-cfg">
+            <span>Cada</span>
+            <input type="number" name="summary_days" min="1" max="30" value="{{ summary_days }}" class="input-xs" aria-label="Cada cuántos días">
+            <span>día(s) a las</span>
+            <input type="time" name="summary_time" value="{{ summary_time }}" class="input-sm" aria-label="Hora">
+            {% if next_summary %}<span class="faint sm">Próximo: {{ next_summary }}</span>{% endif %}
+          </div>
+          <p class="faint sm" style="padding:0 0.7rem 0.5rem 2.6rem;">
+            Trae la ganancia o pérdida del bot en ese período y la acumulada desde el inicio.
+            Por ejemplo, cada 1 día a las 20:00 manda el resumen de las últimas 24 horas.
+          </p>
+          {% endif %}
           {% endfor %}
         </div>
       </div>
-      <button type="submit" class="btn btn-primary">{{ icon('save', 'ic-sm') }} Guardar</button>
+      <div class="btn-row">
+        <button type="submit" class="btn btn-primary" style="flex:0 0 auto;">{{ icon('save', 'ic-sm') }} Guardar</button>
+        <button type="button" class="btn btn-ghost" id="btnSummary" onclick="sendSummary()" style="flex:0 0 auto;"
+                {{ '' if configured else 'disabled' }}>{{ icon('mail', 'ic-sm') }} Enviar resumen ahora</button>
+      </div>
     </form>
   </div>
 
@@ -124,6 +141,20 @@ async function saveNotify(e) {
   e.preventDefault();
   const d = await apiPost('/api/eth/notifications', new FormData($('notifyForm')), 'Notificaciones guardadas');
   if (d && d.ok !== false) setTimeout(() => location.reload(), 600);
+}
+
+async function sendSummary() {
+  const b = $('btnSummary');
+  b.disabled = true;
+  try {
+    const d = await (await fetch('/api/eth/notifications/summary', { method: 'POST' })).json();
+    if (d.ok) toast('Resumen de ' + (d.days === 1 ? '1 día' : d.days + ' días') + ' enviado');
+    else toast(d.error || 'No se pudo enviar', false);
+  } catch (err) {
+    toast('Error de red', false);
+  } finally {
+    b.disabled = false;
+  }
 }
 
 async function sendTest() {

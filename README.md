@@ -70,8 +70,9 @@ Desde **Configuración → Notificaciones** se carga la cuenta de Gmail que env�
 contraseña de aplicación (requiere verificación en 2 pasos; se crea en
 <https://myaccount.google.com/apppasswords>) y la dirección de destino. Avisa compras y
 ventas en LIVE, errores de órdenes o del chequeo (máximo uno por hora), encendido/apagado y
-cambios de modo, pausas por el límite de ETH y un resumen diario (`NOTIFY_DAILY_TIME`,
-23:55 por defecto). El envío corre en segundo plano: si Gmail falla, el bot sigue operando.
+cambios de modo, pausas por el límite de ETH y un resumen periódico de ganancias y pérdidas
+(cada N días a la hora elegida; por defecto todos los días a las 20:00). El envío corre en
+segundo plano: si Gmail falla, el bot sigue operando.
 
 ## Puesta en marcha
 

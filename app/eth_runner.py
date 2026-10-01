@@ -18,7 +18,7 @@ dry_run es False de forma explícita en settings.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import desc
 
@@ -532,51 +532,85 @@ def _usd_to_quote(client, pair: str, amount_usd: float) -> float:
 
 
 
-# ── Resumen diario por mail ───────────────────────────────────────────────────
 
-def send_daily_summary() -> bool:
-    """Mail con el resultado del día local (se programa en el scheduler)."""
-    from zoneinfo import ZoneInfo
+# ── Resumen periódico por mail ────────────────────────────────────────────────
 
+def _signed(value: float, decimals: int = 2) -> str:
+    from app.notifications import money
+    return f"{'+' if value >= 0 else '−'}${money(abs(value), decimals)}"
+
+
+def _start_point(db, dry_run: bool) -> tuple[datetime | None, float | None]:
+    """(desde, valor) del punto de partida con el que se miden los resultados del modo actual."""
+    raw = get_setting(db, "sim_baseline" if dry_run else "live_baseline")
+    try:
+        b = json.loads(raw)
+        return datetime.fromisoformat(b["since"]), float(b["usdt"] if dry_run else b["value"])
+    except (TypeError, ValueError, KeyError):
+        return None, None
+
+
+def send_summary(days: int = 1) -> bool:
+    """Mail con el resultado de los últimos `days` días y el acumulado desde el inicio."""
     from app.notifications import money, notify
 
     with db_session() as db:
         dry_run = _is_dry_run(db)
         flag = 1 if dry_run else 0
-        tz = ZoneInfo(config.TIMEZONE)
-        day_start = (datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
-                     .astimezone(timezone.utc).replace(tzinfo=None))
-        states = (db.query(EthBotState).filter(EthBotState.dry_run == flag, EthBotState.timestamp >= day_start,
-                                               EthBotState.capital.isnot(None))
-                  .order_by(EthBotState.timestamp).all())
-        if not states:
+        now = datetime.utcnow()
+        period_start = now - timedelta(days=days)
+        base_since, base_value = _start_point(db, dry_run)
+        if base_since:
+            period_start = max(period_start, base_since)
+        valued = (EthBotState.dry_run == flag, EthBotState.capital.isnot(None))
+        last = db.query(EthBotState).filter(*valued).order_by(desc(EthBotState.timestamp)).first()
+        if not last:
             return False
-        prev = (db.query(EthBotState.capital).filter(EthBotState.dry_run == flag, EthBotState.timestamp < day_start,
-                                                     EthBotState.capital.isnot(None))
-                .order_by(desc(EthBotState.timestamp)).first())
-        start_value = prev[0] if prev else states[0].capital
-        last = states[-1]
-        change = last.capital - start_value
-        trades = _mode_trades(db, dry_run).filter(EthTrade.timestamp >= day_start).all()
-        buys = sum(t.side == "buy" for t in trades)
+        prev = (db.query(EthBotState).filter(*valued, EthBotState.timestamp <= period_start)
+                .order_by(desc(EthBotState.timestamp)).first()
+                or db.query(EthBotState).filter(*valued, EthBotState.timestamp >= period_start)
+                .order_by(EthBotState.timestamp).first())
+        change = last.capital - prev.capital
+        trades = _mode_trades(db, dry_run).filter(EthTrade.timestamp >= period_start).all()
         sells = [t for t in trades if t.side == "sell"]
         bot_net = sum(t.pnl or 0.0 for t in sells)
+        fees = sum(t.fee_usd or 0.0 for t in trades)
+        all_sells = _mode_trades(db, dry_run).filter(EthTrade.side == "sell")
+        if base_since:
+            all_sells = all_sells.filter(EthTrade.timestamp >= base_since)
+        bot_total = sum(t.pnl or 0.0 for t in all_sells.all())
         inv, avg_cost = _inventory_and_cost(db, dry_run)
         eth_pct = inv * last.current_price / last.capital * 100 if last.capital else 0.0
-        sign = "+" if change >= 0 else "−"
+        label = "del día" if days == 1 else f"de los últimos {days} días"
+        pct = f" ({'+' if change >= 0 else '−'}{money(abs(change) / prev.capital * 100)}%)" if prev.capital else ""
         rows = [
             ("Modo", "SIMULADOR" if dry_run else "LIVE"),
+            ("Período", f"{_local_str(period_start)} → {_local_str(now)}"),
+            ("Ganancia neta del bot", _signed(bot_net, 3)),
+            ("Variación del portfolio", _signed(change, 3) + pct),
+            ("Compras / ventas", f"{len(trades) - len(sells)} / {len(sells)}"),
+            ("Comisiones pagadas", f"${money(fees, 3)}"),
+            ("Precio ETH", f"${money(prev.current_price)} → ${money(last.current_price)}"),
             ("Valor del portfolio", f"${money(last.capital)}"),
-            ("Variación del día", f"{sign}${money(abs(change), 3)} ({sign}{abs(change) / start_value * 100:.2f}%)"
-             if start_value else "—"),
-            ("Compras / ventas", f"{buys} / {len(sells)}"),
-            ("Ganancia neta del bot hoy", f"{'+' if bot_net >= 0 else '−'}${money(abs(bot_net), 3)}"),
-            ("Precio ETH", f"${money(last.current_price)}"),
             ("ETH en el portfolio", f"{eth_pct:.0f}%" + (f" (costo promedio ${money(avg_cost)})" if inv else "")),
         ]
-        note = ("La variación incluye la suba o baja del ETH que tenés en cartera; "
-                "la ganancia del bot es solo la de ventas cerradas.")
-        return notify(db, "daily", f"ETH Bot · Resumen del día: {sign}${money(abs(change), 2)}", rows, note)
+        if base_since and base_value:
+            total = last.capital - base_value
+            rows += [
+                ("Ganancia neta del bot desde el inicio", _signed(bot_total, 3)),
+                ("Portfolio desde el inicio",
+                 f"{_signed(total, 3)} ({'+' if total >= 0 else '−'}{money(abs(total) / base_value * 100)}%, "
+                 f"desde {_local_str(base_since)[:5]})"),
+            ]
+        note = ("La ganancia del bot es la de ventas cerradas, ya descontadas las comisiones. "
+                "La variación del portfolio incluye además la suba o baja del ETH que tenés en cartera.")
+        return notify(db, "summary", f"ETH Bot · Resumen {label}: {_signed(bot_net)} del bot", rows, note)
+
+
+def _local_str(dt_utc: datetime) -> str:
+    from zoneinfo import ZoneInfo
+    return dt_utc.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(config.TIMEZONE)).strftime("%d/%m %H:%M")
+
 
 # ── Tick principal ────────────────────────────────────────────────────────────
 

@@ -133,8 +133,9 @@ SMTP_PORT: int = _get_int("SMTP_PORT", 587)
 SMTP_USER: str = _get("SMTP_USER", "")
 SMTP_PASSWORD: str = _get("SMTP_PASSWORD", "")
 NOTIFY_EMAIL: str = _get("NOTIFY_EMAIL", "")
-# Hora local del resumen diario por mail (HH:MM)
-NOTIFY_DAILY_TIME: str = _get("NOTIFY_DAILY_TIME", "23:55")
+# Resumen periódico por mail: cada cuántos días y a qué hora local (valores iniciales; se cambian desde el panel)
+NOTIFY_SUMMARY_DAYS: int = _get_int("NOTIFY_SUMMARY_DAYS", 1)
+NOTIFY_SUMMARY_TIME: str = _get("NOTIFY_SUMMARY_TIME", "20:00")
 
 # ─── Dashboard ───────────────────────────────────────────────────────────────
 DASHBOARD_AUTO_REFRESH_SECONDS: int = _get_int("DASHBOARD_AUTO_REFRESH_SECONDS", 30)

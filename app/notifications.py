@@ -37,7 +37,7 @@ EVENTS: dict[str, tuple[str, str, str]] = {
     "bot_status":   ("notify_status", "Estado del bot", "#7c8cff"),
     "mode":         ("notify_status", "Modo de operación", "#fbbf24"),
     "cap":          ("notify_cap", "Compras en pausa por límite de ETH", "#fbbf24"),
-    "daily":        ("notify_daily", "Resumen del día", "#7c8cff"),
+    "summary":      ("notify_daily", "Resumen de resultados", "#7c8cff"),
     "test":         ("", "Mail de prueba", "#7c8cff"),
 }
 TOGGLES = {
@@ -45,13 +45,23 @@ TOGGLES = {
     "notify_errors": "Errores de órdenes o del chequeo (máximo uno por hora)",
     "notify_status": "Encendido / apagado del bot y cambios de modo",
     "notify_cap": "Compras en pausa por el límite de 80% en ETH",
-    "notify_daily": "Resumen diario",
+    "notify_daily": "Resumen periódico de ganancias y pérdidas",
 }
 
 
 def money(value: float, decimals: int = 2) -> str:
     """Formato argentino: 2.679,10"""
     return f"{value:,.{decimals}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def summary_schedule(db) -> tuple[int, str]:
+    """(cada cuántos días, hora local HH:MM) del resumen periódico."""
+    try:
+        days = int(get_setting(db, "summary_days", config.NOTIFY_SUMMARY_DAYS))
+    except (TypeError, ValueError):
+        days = config.NOTIFY_SUMMARY_DAYS
+    hhmm = get_setting(db, "summary_time", config.NOTIFY_SUMMARY_TIME) or config.NOTIFY_SUMMARY_TIME
+    return max(1, min(days, 30)), hhmm
 
 
 def get_smtp_config(db) -> dict:

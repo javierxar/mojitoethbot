@@ -440,6 +440,10 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .check-row { display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.55rem 0.7rem; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.88rem; font-weight: 500; color: var(--text); transition: background 0.15s; }
 .check-row:hover { background: rgba(255, 255, 255, 0.03); }
 .check-row input { width: 17px; height: 17px; margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
+.summary-cfg { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.1rem 0.7rem 0.5rem 2.6rem; font-size: 0.86rem; color: var(--muted); }
+input[type=time] { height: 42px; padding: 0 0.9rem; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border-2); color: var(--text); font: inherit; font-size: 0.92rem; outline: none; }
+.summary-cfg .input-xs { width: 72px; height: 36px; text-align: center; padding: 0 0.4rem; }
+.summary-cfg .input-sm { width: 120px; height: 36px; }
 .steps { padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.7rem; color: var(--muted); font-size: 0.88rem; line-height: 1.6; }
 .steps li::marker { color: var(--accent); font-weight: 700; }
 .form-msg.err { color: var(--red); }

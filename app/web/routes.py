@@ -542,8 +542,12 @@ async def notifications_page(request: Request):
             "smtp_user": cfg["user"], "notify_email": cfg["to"], "smtp_password_set": bool(cfg["password"]),
             "smtp_server": f"{cfg['host']}:{cfg['port']}", "configured": nt.is_configured(cfg),
             "toggles": [(k, label, nt.toggle_enabled(db, k)) for k, label in nt.TOGGLES.items()],
-            "daily_time": config.NOTIFY_DAILY_TIME, "last_test": nt.last_test(),
+            "last_test": nt.last_test(),
         }
+        extra["summary_days"], extra["summary_time"] = nt.summary_schedule(db)
+    from app.scheduler import get_next_summary_time
+    nxt = get_next_summary_time()
+    extra["next_summary"] = nxt.strftime("%d/%m/%Y %H:%M") if nxt else None
     return _page(request, "notifications.html", **extra)
 
 
@@ -554,15 +558,41 @@ async def api_notifications_save(request: Request):
     smtp_user = (form.get("smtp_user") or "").strip()
     notify_email = (form.get("notify_email") or "").strip()
     smtp_password = (form.get("smtp_password") or "").replace(" ", "").strip()
+    try:
+        summary_days = int(form.get("summary_days") or 1)
+        hour, minute = (int(x) for x in (form.get("summary_time") or "20:00").split(":"))
+        if not (1 <= summary_days <= 30 and 0 <= hour < 24 and 0 <= minute < 60):
+            raise ValueError
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "El resumen va cada 1 a 30 días, con una hora válida (HH:MM)."})
     with db_session() as db:
+        set_setting(db, "summary_days", str(summary_days))
+        set_setting(db, "summary_time", f"{hour:02d}:{minute:02d}")
         set_setting(db, "smtp_user", smtp_user)
         set_setting(db, "notify_email", notify_email)
         if smtp_password:                       # vacío = conservar la contraseña guardada
             set_setting(db, "smtp_password", smtp_password)
         for key in TOGGLES:
             set_setting(db, key, "true" if form.get(key) == "on" else "false")
-    logger.info("[WEB] Notificaciones guardadas: desde=%s hacia=%s", smtp_user, notify_email)
-    return JSONResponse({"ok": True})
+    from app.scheduler import schedule_summary
+    nxt = schedule_summary()
+    logger.info("[WEB] Notificaciones guardadas: desde=%s hacia=%s, resumen cada %d día(s) a las %02d:%02d",
+                smtp_user, notify_email, summary_days, hour, minute)
+    return JSONResponse({"ok": True, "next_summary": nxt.strftime("%d/%m/%Y %H:%M") if nxt else None})
+
+
+@router.post("/api/eth/notifications/summary")
+def api_notifications_summary_now(request: Request):
+    """Envía ahora el resumen del período configurado (no cambia la programación)."""
+    from app.eth_runner import send_summary
+    from app.notifications import get_smtp_config, is_configured, summary_schedule
+    with db_session() as db:
+        if not is_configured(get_smtp_config(db)):
+            return JSONResponse({"ok": False, "error": "Primero configurá la cuenta de Gmail y el destino."})
+        days, _ = summary_schedule(db)
+    if not send_summary(days):
+        return JSONResponse({"ok": False, "error": "No se envió: el resumen está desactivado o todavía no hay datos."})
+    return JSONResponse({"ok": True, "days": days})
 
 
 @router.post("/api/eth/notifications/test")

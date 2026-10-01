@@ -7,7 +7,7 @@ import app.eth_runner as r
 import app.notifications as nt
 from app import config
 from app.database import set_setting
-from app.models import EthBotState
+from app.models import EthBotState, EthTrade
 from tests.test_execution import FEE, FakeBitso, _grid_decision, _store_grid
 
 
@@ -95,18 +95,69 @@ def test_inventory_cap_is_notified_once_until_the_bot_trades(db, sent, monkeypat
     assert len([s for _, s, _ in sent if "pausa" in s]) == 2
 
 
-def test_daily_summary_reports_the_day(db, sent, monkeypatch):
+def test_summary_reports_one_day(db, sent, monkeypatch):
     _configure(db)
     set_setting(db, "dry_run", "false")
     now = datetime.utcnow()
-    db.add(EthBotState(timestamp=now - timedelta(days=1), regime="grid", current_price=2600, capital=20.0, dry_run=0))
+    db.add(EthBotState(timestamp=now - timedelta(days=1, hours=1), regime="grid", current_price=2600, capital=20.0, dry_run=0))
     db.add(EthBotState(timestamp=now, regime="grid", current_price=2650, capital=20.5, dry_run=0))
     db.commit()
     monkeypatch.setattr(r, "db_session", _session_factory(db))
-    assert r.send_daily_summary()
+    assert r.send_summary(1)
     to, subject, html = sent[0]
-    assert subject == "ETH Bot · Resumen del día: +$0,50"
-    assert "LIVE" in html and "$20,50" in html
+    assert subject == "ETH Bot · Resumen del día: +$0,00 del bot"
+    assert "LIVE" in html and "$20,50" in html and "+$0,500 (+2,50%)" in html
+
+
+def test_summary_covers_the_configured_days_and_totals_since_start(db, sent, monkeypatch):
+    _configure(db)
+    set_setting(db, "dry_run", "false")
+    now = datetime.utcnow()
+    set_setting(db, "live_baseline", json.dumps({"since": (now - timedelta(days=10)).isoformat(),
+                                                 "usdt": 20.0, "eth": 0, "price": 2600, "value": 20.0}))
+    db.add(EthBotState(timestamp=now - timedelta(days=4), regime="grid", current_price=2600, capital=20.2, dry_run=0))
+    db.add(EthBotState(timestamp=now, regime="grid", current_price=2700, capital=21.0, dry_run=0))
+    for days_ago, pnl in ((8, 0.10), (2, 0.05), (1, -0.01)):      # la de hace 8 días queda fuera de los 3 días
+        db.add(EthTrade(timestamp=now - timedelta(days=days_ago), side="sell", price=2700, amount_eth=0.002,
+                        amount_usd=5.4, pnl=pnl, fee_usd=0.02, strategy="grid", status="completed", dry_run=0))
+    db.commit()
+    monkeypatch.setattr(r, "db_session", _session_factory(db))
+    assert r.send_summary(3)
+    _, subject, html = sent[0]
+    assert subject == "ETH Bot · Resumen de los últimos 3 días: +$0,04 del bot"
+    assert "+$0,040" in html                      # ganancia del bot en el período
+    assert "+$0,140" in html                      # ganancia del bot desde el inicio
+    assert "+$1,000 (+5,00%" in html             # portfolio desde el inicio: $20 → $21
+
+
+def test_summary_is_not_sent_when_disabled(db, sent, monkeypatch):
+    _configure(db)
+    set_setting(db, "notify_daily", "false")
+    db.add(EthBotState(timestamp=datetime.utcnow(), regime="grid", current_price=2650, capital=20.5, dry_run=0))
+    set_setting(db, "dry_run", "false")
+    db.commit()
+    monkeypatch.setattr(r, "db_session", _session_factory(db))
+    assert not r.send_summary(1)
+    assert sent == []
+
+
+def test_summary_schedule_is_read_and_clamped(db):
+    assert nt.summary_schedule(db) == (config.NOTIFY_SUMMARY_DAYS, config.NOTIFY_SUMMARY_TIME)
+    set_setting(db, "summary_days", "7")
+    set_setting(db, "summary_time", "08:30")
+    assert nt.summary_schedule(db) == (7, "08:30")
+    set_setting(db, "summary_days", "99")
+    assert nt.summary_schedule(db)[0] == 30
+
+
+def test_next_summary_is_today_or_tomorrow_at_the_chosen_time():
+    from zoneinfo import ZoneInfo
+    from app.scheduler import _next_at
+    tz = ZoneInfo(config.TIMEZONE)
+    now = datetime.now(tz)
+    nxt = _next_at("20:00", tz)
+    assert (nxt.hour, nxt.minute) == (20, 0)
+    assert now < nxt <= now + timedelta(days=1)
 
 
 def _session_factory(db):

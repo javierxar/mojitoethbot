@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app import config
@@ -84,12 +83,49 @@ def _run_eth_job() -> None:
         release_lock()
 
 
-def _run_daily_summary() -> None:
+def _run_summary() -> None:
     try:
-        from app.eth_runner import send_daily_summary
-        send_daily_summary()
+        from app.eth_runner import send_summary
+        from app.notifications import summary_schedule
+        with db_session() as db:
+            days, _ = summary_schedule(db)
+        send_summary(days)
     except Exception as exc:
-        logger.exception("[SCHEDULER] Error en resumen diario: %s", exc)
+        logger.exception("[SCHEDULER] Error en resumen por mail: %s", exc)
+
+
+def _next_at(hhmm: str, tz: ZoneInfo) -> datetime:
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    now = datetime.now(tz)
+    first = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return first if first > now else first + timedelta(days=1)
+
+
+def schedule_summary() -> datetime | None:
+    """(Re)programa el resumen según la configuración guardada. Devuelve el próximo envío."""
+    if not _scheduler or not _scheduler.running:
+        return None
+    from app.notifications import summary_schedule
+    with db_session() as db:
+        days, hhmm = summary_schedule(db)
+    tz = ZoneInfo(config.TIMEZONE)
+    job = _scheduler.add_job(
+        _run_summary,
+        trigger=IntervalTrigger(days=days, start_date=_next_at(hhmm, tz), timezone=config.TIMEZONE),
+        id="eth_summary",
+        name=f"Resumen por mail (cada {days} día(s) a las {hhmm})",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    logger.info("[SCHEDULER] Resumen por mail cada %d día(s) a las %s — próximo: %s", days, hhmm, job.next_run_time)
+    return job.next_run_time
+
+
+def get_next_summary_time() -> datetime | None:
+    if not _scheduler or not _scheduler.running:
+        return None
+    job = _scheduler.get_job("eth_summary")
+    return job.next_run_time if job else None
 
 
 # ── Inicio / parada ──────────────────────────────────────────────────────────
@@ -115,16 +151,8 @@ def start_scheduler() -> None:
         misfire_grace_time=120,
         next_run_time=datetime.now(tz),
     )
-    hour, minute = (int(x) for x in config.NOTIFY_DAILY_TIME.split(":"))
-    _scheduler.add_job(
-        _run_daily_summary,
-        trigger=CronTrigger(hour=hour, minute=minute, timezone=config.TIMEZONE),
-        id="eth_daily_summary",
-        name="Resumen diario por mail",
-        replace_existing=True,
-        misfire_grace_time=600,
-    )
     _scheduler.start()
+    schedule_summary()
     logger.info("[SCHEDULER] Iniciado — tick ETH cada %d min (%s), primer tick inmediato", interval, config.TIMEZONE)
 
 
